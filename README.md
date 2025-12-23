@@ -38,6 +38,7 @@ Sonobarr marries your existing Lidarr library with Last.fm’s discovery graph t
 - 🎧 **Preview & context panels** – launch YouTube or iTunes previews, inspect Last.fm biographies, and read key stats without leaving the grid.
 - ⚡️ **Real-time UX** – Socket.IO keeps discovery progress, toast alerts, and button states in sync across every connected client.
 - 👥 **Role-based access** – authentication, user management, profile controls for personal services, and admin-only settings live in one UI.
+- 🔐 **OIDC Single Sign-On** – enable OpenID Connect for authentication, with an optional "OIDC-only" mode.
 - 🛡️ **Hardened configuration** – atomic settings writes, locked-down file permissions, and CSRF-protected forms keep secrets safe.
 - 🔔 **Update & schema self-healing** – footer badges surface new releases and the app backfills missing DB columns before loading users.
 - 🐳 **Docker-first deployment** – official GHCR image, rootless-friendly UID/GID mapping, and automatic migrations on start.
@@ -90,11 +91,9 @@ Sonobarr marries your existing Lidarr library with Last.fm’s discovery graph t
    secret_key=change-me-to-a-long-random-string
    lidarr_address=http://your-lidarr:8686
    lidarr_api_key=xxxxxxxxxxxxxxxxxxxxxxxx
-   last_fm_api_key=xxxxxxxxxxxxxxxxxxxxxxxx
-   last_fm_api_secret=xxxxxxxxxxxxxxxxxxxxxxxx
-  # Optional – enables the AI assistant modal (any OpenAI-compatible endpoint)
-  # openai_api_key=sk-...
-  # openai_api_base=https://api.openai.com/v1
+
+   # Note: External API keys (Last.fm, YouTube, LLM) are now configured per-user
+   # in Profile settings. The global keys below are deprecated.
    ```
    > All keys in `.env` are lowercase by convention; the app will happily accept uppercase equivalents if you prefer exporting variables.
 4. Start Sonobarr:
@@ -144,16 +143,16 @@ All variables can be supplied in lowercase (preferred for `.env`) or uppercase (
 | `quality_profile_id` | `1` | Numeric profile ID from Lidarr (see [issue #1](https://github.com/Dodelidoo-Labs/sonobarr/issues/1)). |
 | `metadata_profile_id` | `1` | Numeric metadata profile ID. |
 | `fallback_to_top_result` | `false` | When MusicBrainz finds no strong match, fall back to the first Lidarr search result. |
-| `search_for_missing_albums` | `false` | Toggle Lidarr’s “search for missing” flag when adding an artist. |
+| `search_for_missing_albums` | `false` | Toggle Lidarr's "search for missing" flag when adding an artist. |
 | `dry_run_adding_to_lidarr` | `false` | If `true`, Sonobarr will simulate additions without calling Lidarr. |
-| `last_fm_api_key` | – | Last.fm API key for similarity lookups. |
-| `last_fm_api_secret` | – | Last.fm API secret. |
-| `youtube_api_key` | – | Enables YouTube previews in the “Listen” modal. Optional but recommended. |
-| `openai_api_key` | – | Optional key for your OpenAI-compatible provider. Leave empty if your endpoint allows anonymous access. |
-| `openai_model` | `gpt-4o-mini` | Override the model slug sent to the provider. |
-| `openai_api_base` | – | Custom base URL for LiteLLM, Azure OpenAI, self-hosted Ollama gateways, etc. Blank uses the SDK default. **Must be complete base url such as `http://IP:PORT/v1` for example. |
-| `openai_extra_headers` | – | JSON object of additional headers sent with every LLM call (e.g., custom auth or routing hints). |
-| `openai_max_seed_artists` | `5` | Maximum number of seed artists returned from each AI prompt. |
+| `last_fm_api_key` | – | **Deprecated**. Last.fm API key for similarity lookups. Now configured per-user in Profile settings. |
+| `last_fm_api_secret` | – | **Deprecated**. Last.fm API secret. Now configured per-user in Profile settings. |
+| `youtube_api_key` | – | **Deprecated**. Enables YouTube previews. Now configured per-user in Profile settings. |
+| `openai_api_key` | – | **Deprecated**. API key for OpenAI-compatible providers. Now configured per-user in Profile settings. |
+| `openai_model` | `gpt-4o-mini` | **Deprecated**. Model slug sent to the provider. Now configured per-user in Profile settings. |
+| `openai_api_base` | – | **Deprecated**. Custom base URL for LLM providers. Now configured per-user in Profile settings. |
+| `openai_extra_headers` | – | **Deprecated**. JSON object of additional headers for LLM calls. Now configured per-user in Profile settings. |
+| `openai_max_seed_artists` | `5` | **Deprecated**. Max seed artists from AI prompts. Now configured per-user in Profile settings. |
 | `similar_artist_batch_size` | `10` | Number of cards sent per batch while streaming results. |
 | `auto_start` | `false` | Automatically start a discovery session on load. |
 | `auto_start_delay` | `60` | Delay (seconds) before auto-start kicks in. |
@@ -163,6 +162,21 @@ All variables can be supplied in lowercase (preferred for `.env`) or uppercase (
 | `sonobarr_superadmin_reset` | `false` | Set to `true` **once** to reapply the bootstrap credentials on next start. |
 | `release_version` | `unknown` | Populated automatically inside the Docker image; shown in the footer. No need to set manually. |
 | `sonobarr_config_dir` | `/sonobarr/config` | Override where Sonobarr writes `app.db`, `settings_config.json`, and migrations. |
+
+### OIDC SSO Configuration
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `oidc_client_id` | – | Client ID from your OIDC provider. |
+| `oidc_client_secret` | – | Client Secret from your OIDC provider. |
+| `oidc_server_metadata_url` | – | The Discovery or Server Metadata URL of your OIDC provider (e.g., `https://your-provider.com/.well-known/openid-configuration`). |
+| `oidc_only` | `false` | If `true`, disables password-based login and redirects all users to the OIDC provider. **Warning**: If your OIDC provider is down, all users (including admins) will be locked out. |
+
+**Important Note for OIDC Configuration:**
+When configuring your OIDC provider, you **must** register a Redirect URI (or Callback URL). This is the URL where the OIDC provider will send the user back to Sonobarr after successful authentication. The format for this URI is:
+`https://[YOUR_SONOBARR_DOMAIN_OR_IP]/oidc/callback`
+
+For security, OIDC providers require `https` for all production URLs. For local development, most providers allow `http://localhost:[port]` as an exception. Check your provider's documentation to confirm.
 
 > ℹ️ `secret_key` is mandatory. If missing, the app refuses to boot to prevent insecure session cookies. With Docker Compose, make sure the key exists in `.env` and that `.env` is declared via `env_file:` as shown above.
 
@@ -181,17 +195,18 @@ Currently relying on manual testing. Contributions adding pytest coverage, espec
 ## Using the app
 
 1. **Sign in** with the bootstrap admin credentials. Create additional users from the **User management** page (top-right avatar → *User management*).
-2. **Configure integrations** via the **Settings** button (top bar gear icon). Provide your Lidarr endpoint/key and optional YouTube key (can both be set in .env or UI)
-3. **Fetch Lidarr artists** with the left sidebar button. Select the artists you want to base discovery on.
-4. Hit **Start**. Sonobarr queues batches of similar artists and streams them to the grid. Cards show genre, popularity, listeners, similarity (from Last.fm), plus a status LED dot in the image corner.
-5. Use **Bio** and **Listen** buttons for deeper context - the bio modal keeps Last.fm paragraph spacing intact. Click **Add to Lidarr** to push the candidate back into your library; feedback appears on the card immediately.
-6. Stop or resume discovery anytime. Toast notifications keep everyone informed when conflicts or errors occur.
+2. **Configure Lidarr** via the **Settings** button (top bar gear icon). Provide your Lidarr endpoint and API key.
+3. **Set up your API keys** in your **Profile** (top-right avatar → *Profile*). Configure Last.fm, YouTube, and LLM credentials for personalized discovery features.
+4. **Fetch Lidarr artists** with the left sidebar button. Select the artists you want to base discovery on.
+5. Hit **Start**. Sonobarr queues batches of similar artists and streams them to the grid. Cards show genre, popularity, listeners, similarity (from Last.fm), plus a status LED dot in the image corner.
+6. Use **Bio** and **Listen** buttons for deeper context - the bio modal keeps Last.fm paragraph spacing intact. Click **Add to Lidarr** to push the candidate back into your library; feedback appears on the card immediately.
+7. Stop or resume discovery anytime. Toast notifications keep everyone informed when conflicts or errors occur.
 
 ### AI-powered prompts
 
 - Click the **AI Assist** button on the top bar to open a prompt modal.
 - Describe the mood, genres, or examples you're craving (e.g. "dreamy synth-pop like M83 but calmer").
-- Provide an API key and/or base URL in the settings modal (.env works too) for whichever OpenAI-compatible provider you use; without valid credentials the assistant stays disabled.
+- Configure your LLM API key and base URL in your **Profile** (top-right avatar → *Profile* → *External API Keys*). Without valid credentials, the AI assistant remains disabled.
 - The assistant picks a handful of seed artists, kicks off a discovery session automatically, and keeps streaming cards just like a normal Lidarr-driven search.
 
 The footer shows:

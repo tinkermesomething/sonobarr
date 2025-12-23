@@ -49,16 +49,37 @@ def _resolve_request_api_key():
 def api_key_required(view):
     """Decorator to require API key for API endpoints."""
     from functools import wraps
-    
+
     @wraps(view)
     def wrapped(*args, **kwargs):
         api_key = _resolve_request_api_key()
+
+        # No API key provided
+        if not api_key:
+            configured_key = _configured_api_key()
+            # If system key is configured but not provided, reject
+            if configured_key:
+                return jsonify(_ERROR_KEY_INVALID), 401
+            # If no system key is configured and no key provided, allow
+            # (for backward compatibility with systems that never set API keys)
+            return view(*args, **kwargs)
+
+        # Try system API key first (backward compatible)
         configured_key = _configured_api_key()
+        if configured_key and configured_key == api_key:
+            # Valid system API key
+            return view(*args, **kwargs)
 
-        if configured_key and configured_key != api_key:
-            return jsonify(_ERROR_KEY_INVALID), 401
+        # Try user API key (prefixed with sk_user_)
+        if api_key.startswith("sk_user_"):
+            user = User.find_by_api_key(api_key)
+            if user and user.is_active:
+                # Valid user API key - optionally track usage here
+                current_app.logger.debug(f"API request authenticated with user API key for user: {user.username}")
+                return view(*args, **kwargs)
 
-        return view(*args, **kwargs)
+        # Invalid API key
+        return jsonify(_ERROR_KEY_INVALID), 401
 
     return wrapped
 

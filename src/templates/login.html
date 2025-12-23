@@ -17,7 +17,17 @@
                  style="max-height: 80px;">
           </div>
           <h1 class="h4 text-center mb-3">Sign in to Sonobarr</h1>
-          <form method="post" novalidate>
+
+          <div class="mb-3">
+              <a href="{{ url_for('oidc_auth.login') }}" class="btn btn-primary btn-lg w-100">
+                  Login with SSO
+              </a>
+          </div>
+
+          <hr>
+          <p class="text-center">Or with a password</p>
+
+          <form method="POST" action="{{ url_for('auth.login_submit') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
               <label for="username" class="form-label">Username</label>
@@ -27,7 +37,7 @@
               <label for="password" class="form-label">Password</label>
               <input type="password" class="form-control" id="password" name="password" required>
             </div>
-            <button type="submit" class="btn btn-primary w-100">Sign in</button>
+            <button type="submit" class="btn btn-secondary w-100">Sign in</button>
           </form>
           <p class="text-muted small mt-3 mb-0">
             Need help? Ask your Sonobarr administrator to create an account for you.
