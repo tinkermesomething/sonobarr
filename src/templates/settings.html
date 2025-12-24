@@ -1,0 +1,572 @@
+{% extends "layout.html" %}
+
+{% block title %}Settings · Sonobarr{% endblock %}
+{% block body_classes %}bg-body-secondary{% endblock %}
+{% block topbar_title %}Settings{% endblock %}
+{% block topbar_actions %}
+<a class="btn btn-outline-light btn-sm" href="{{ url_for('main.home') }}">Back to app</a>
+{% endblock %}
+
+{% block main %}
+<div class="container-fluid py-4">
+  <div class="row">
+    <!-- Sidebar Navigation -->
+    <div class="col-12 col-md-3 col-lg-2 mb-4">
+      <div class="card shadow-sm">
+        <div class="card-body p-0">
+          <nav class="nav flex-column">
+            <a class="nav-link {% if active_tab == 'profile' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
+               href="{{ url_for('main.settings', tab='profile') }}">
+              <i class="fa-solid fa-id-card"></i>
+              <span>Profile</span>
+            </a>
+            {% if current_user.is_admin %}
+            <a class="nav-link {% if active_tab == 'users' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
+               href="{{ url_for('main.settings', tab='users') }}">
+              <i class="fa-solid fa-users-gear"></i>
+              <span>Users</span>
+            </a>
+            <a class="nav-link {% if active_tab == 'requests' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
+               href="{{ url_for('main.settings', tab='requests') }}">
+              <i class="fa-solid fa-music"></i>
+              <span>Artist Requests</span>
+            </a>
+            <a class="nav-link {% if active_tab == 'system' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
+               href="{{ url_for('main.settings', tab='system') }}">
+              <i class="fa-solid fa-gear"></i>
+              <span>System</span>
+            </a>
+            {% endif %}
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content Area -->
+    <div class="col-12 col-md-9 col-lg-10">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          {% if active_tab == 'profile' %}
+          <!-- Profile Settings -->
+          <h2 class="h4 mb-4">Profile Settings</h2>
+          <form method="post" action="{{ url_for('main.update_settings') }}" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="tab" value="profile">
+
+            <div class="mb-3">
+              <label for="display_name" class="form-label">Display name</label>
+              <input type="text" class="form-control" id="display_name" name="display_name"
+                     value="{{ current_user.display_name or '' }}" placeholder="How you appear in the app">
+            </div>
+            <div class="mb-3">
+              <label for="avatar_url" class="form-label">Profile image URL</label>
+              <input type="url" class="form-control" id="avatar_url" name="avatar_url"
+                     value="{{ current_user.avatar_url or '' }}" placeholder="https://example.com/avatar.png">
+              <div class="form-text">PNG/JPEG/SVG URLs work best. Leave empty to use the default icon.</div>
+            </div>
+
+            <hr>
+            <p class="fw-semibold">Listening services</p>
+            <div class="mb-3">
+              <label for="lastfm_username" class="form-label">Last.fm username</label>
+              <input type="text" class="form-control" id="lastfm_username" name="lastfm_username"
+                     value="{{ current_user.lastfm_username or '' }}" placeholder="e.g., yourlastfmhandle">
+              <div class="form-text">Optional. Used to pull personal recommendations from your Last.fm profile.</div>
+              <div class="form-text">We use your public Last.fm profile to approximate recommendations. Linking is not required.</div>
+            </div>
+            <div class="mb-3">
+              <label for="listenbrainz_username" class="form-label">ListenBrainz username</label>
+              <input type="text" class="form-control" id="listenbrainz_username" name="listenbrainz_username"
+                     value="{{ current_user.listenbrainz_username or '' }}" placeholder="e.g., yourlistenbrainz">
+              <div class="form-text">Optional. Enables ListenBrainz weekly exploration picks in personal discovery.</div>
+              <div class="form-text">We only read public playlist data; nothing is posted back to ListenBrainz.</div>
+            </div>
+
+            <hr>
+            <p class="fw-semibold">External API Keys</p>
+            <p class="text-muted small">Configure your personal API keys for enhanced features. These are stored securely and only used for your account.</p>
+
+            <div class="mb-3">
+              <label for="lastfm_api_key" class="form-label">Last.fm API Key</label>
+              <input type="text" class="form-control" id="lastfm_api_key" name="lastfm_api_key"
+                     value="{{ current_user.lastfm_api_key or '' }}" placeholder="Enter your Last.fm API Key">
+              <div class="form-text">Used for fetching artist recommendations. Works with your Last.fm username above.</div>
+            </div>
+            <div class="mb-3">
+              <label for="lastfm_api_secret" class="form-label">Last.fm API Secret</label>
+              <input type="text" class="form-control" id="lastfm_api_secret" name="lastfm_api_secret"
+                     value="{{ current_user.lastfm_api_secret or '' }}" placeholder="Enter your Last.fm API Secret">
+            </div>
+
+            <div class="mb-3">
+              <label for="youtube_api_key" class="form-label">YouTube API Key</label>
+              <input type="text" class="form-control" id="youtube_api_key" name="youtube_api_key"
+                     value="{{ current_user.youtube_api_key or '' }}" placeholder="Enter your YouTube API Key">
+              <div class="form-text">Powers the preview player. Leave blank to fall back to iTunes samples.</div>
+            </div>
+
+            <div class="mb-3">
+              <label for="openai_api_key" class="form-label">LLM API Key</label>
+              <input type="text" class="form-control" id="openai_api_key" name="openai_api_key"
+                     value="{{ current_user.openai_api_key or '' }}" placeholder="sk-...">
+              <div class="form-text">For OpenAI, Azure OpenAI, LiteLLM, or any compatible gateway. Leave blank if not needed.</div>
+            </div>
+            <div class="mb-3">
+              <label for="openai_api_base" class="form-label">LLM API Base URL</label>
+              <input type="url" class="form-control" id="openai_api_base" name="openai_api_base"
+                     value="{{ current_user.openai_api_base or '' }}" placeholder="https://api.openai.com/v1">
+              <div class="form-text">Point to self-hosted or proxy endpoints. Leave blank for SDK default.</div>
+            </div>
+            <div class="mb-3">
+              <label for="openai_model" class="form-label">LLM Model Name</label>
+              <input type="text" class="form-control" id="openai_model" name="openai_model"
+                     value="{{ current_user.openai_model or '' }}" placeholder="gpt-4o-mini">
+              <div class="form-text">Model to use (e.g., gpt-4o-mini, claude-3-opus-20240229).</div>
+            </div>
+            <div class="mb-3">
+              <label for="openai_max_seed_artists" class="form-label">LLM Max Seed Artists</label>
+              <input type="number" class="form-control" id="openai_max_seed_artists" name="openai_max_seed_artists"
+                     value="{{ current_user.openai_max_seed_artists or '' }}" min="1" step="1" placeholder="5">
+              <div class="form-text">How many of your top artists to feed the LLM. Higher = better context but slower.</div>
+            </div>
+            <div class="mb-3">
+              <label for="openai_extra_headers" class="form-label">LLM Extra Headers (JSON)</label>
+              <textarea class="form-control" id="openai_extra_headers" name="openai_extra_headers" rows="2" placeholder='{"Authorization": "Bearer ..."}'
+              >{{ current_user.openai_extra_headers or '' }}</textarea>
+              <div class="form-text">Optional JSON object of additional headers for custom auth or provider routing.</div>
+            </div>
+
+            <hr>
+            {% if not current_user.oidc_id %}
+            <p class="fw-semibold">Change password</p>
+            <div class="mb-3">
+              <label for="current_password" class="form-label">Current password</label>
+              <input type="password" class="form-control" id="current_password" name="current_password"
+                     autocomplete="current-password">
+            </div>
+            <div class="mb-3">
+              <label for="new_password" class="form-label">New password</label>
+              <input type="password" class="form-control" id="new_password" name="new_password"
+                     autocomplete="new-password">
+              <div class="form-text">Leave blank to keep your current password. Minimum 8 characters.</div>
+            </div>
+            <div class="mb-3">
+              <label for="confirm_password" class="form-label">Confirm new password</label>
+              <input type="password" class="form-control" id="confirm_password" name="confirm_password"
+                     autocomplete="new-password">
+            </div>
+            {% endif %}
+
+            <div class="d-flex justify-content-end gap-2">
+              <a href="{{ url_for('main.home') }}" class="btn btn-outline-secondary">Cancel</a>
+              <button type="submit" class="btn btn-primary">Save changes</button>
+            </div>
+          </form>
+
+          {% elif active_tab == 'users' %}
+          <!-- User Management -->
+          <h2 class="h4 mb-4">User Management</h2>
+          <div class="row gy-4">
+            <div class="col-12 col-lg-5">
+              <div class="card">
+                <div class="card-body">
+                  <h3 class="h5 mb-3">Create user</h3>
+                  <form method="post" action="{{ url_for('main.update_settings') }}" novalidate>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="tab" value="users">
+                    <input type="hidden" name="action" value="create">
+                    <div class="mb-3">
+                      <label for="username" class="form-label">Username</label>
+                      <input type="text" class="form-control" id="username" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                      <label for="new_display_name" class="form-label">Display name</label>
+                      <input type="text" class="form-control" id="new_display_name" name="display_name"
+                             placeholder="Optional public name">
+                    </div>
+                    <div class="mb-3">
+                      <label for="new_avatar_url" class="form-label">Profile image URL</label>
+                      <input type="url" class="form-control" id="new_avatar_url" name="avatar_url"
+                             placeholder="https://example.com/avatar.png">
+                    </div>
+                    <div class="mb-3">
+                      <label for="password" class="form-label">Password</label>
+                      <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="mb-3">
+                      <label for="confirm_password" class="form-label">Confirm password</label>
+                      <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                    </div>
+                    <div class="form-check form-switch mb-3">
+                      <input class="form-check-input" type="checkbox" id="is_admin" name="is_admin">
+                      <label class="form-check-label" for="is_admin">Grant admin privileges</label>
+                    </div>
+                    <div class="d-grid">
+                      <button type="submit" class="btn btn-primary">Create user</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-7">
+              <div class="card">
+                <div class="card-body">
+                  <h3 class="h5 mb-3">Existing users</h3>
+                  {% if users %}
+                  <div class="table-responsive">
+                    <table class="table align-middle">
+                      <thead>
+                        <tr>
+                          <th scope="col">Username</th>
+                          <th scope="col">Display name</th>
+                          <th scope="col">Auth</th>
+                          <th scope="col">Role</th>
+                          <th scope="col" class="text-end">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for user in users %}
+                        <tr>
+                          <td>{{ user.username }}</td>
+                          <td>{{ user.display_name or '—' }}</td>
+                          <td>
+                            {% if user.oidc_id %}
+                            <span class="badge bg-info" title="Authenticates via OIDC SSO">OIDC</span>
+                            {% else %}
+                            <span class="badge bg-secondary" title="Local password authentication">Local</span>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if user.is_admin %}
+                            <span class="badge bg-primary">Admin</span>
+                            {% else %}
+                            <span class="badge bg-secondary">User</span>
+                            {% endif %}
+                          </td>
+                          <td class="text-end">
+                            {% if user.id != current_user.id %}
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editUserModal"
+                                    data-user-id="{{ user.id }}"
+                                    data-user-username="{{ user.username }}"
+                                    data-user-displayname="{{ user.display_name or '' }}"
+                                    data-user-avatarurl="{{ user.avatar_url or '' }}"
+                                    data-user-isadmin="{{ 'true' if user.is_admin else 'false' }}"
+                                    data-user-isactive="{{ 'true' if user.is_active else 'false' }}"
+                                    data-user-isoidc="{{ 'true' if user.oidc_id else 'false' }}">
+                              Edit
+                            </button>
+                            <form method="post" action="{{ url_for('main.update_settings') }}" class="d-inline" onsubmit="return confirm('Delete {{ user.username }}?');">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                              <input type="hidden" name="tab" value="users">
+                              <input type="hidden" name="action" value="delete">
+                              <input type="hidden" name="user_id" value="{{ user.id }}">
+                              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </form>
+                            {% else %}
+                            <span class="text-muted small">This is you</span>
+                            {% endif %}
+                          </td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  {% else %}
+                  <p class="text-muted mb-0">No users found.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {% elif active_tab == 'requests' %}
+          <!-- Artist Requests -->
+          <h2 class="h4 mb-4">Artist Requests</h2>
+          <div class="card">
+            <div class="card-body">
+              <h3 class="h5 mb-3">Pending artist requests</h3>
+              {% if artist_requests %}
+              <div class="table-responsive">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Artist</th>
+                      <th scope="col">Requested by</th>
+                      <th scope="col">Requested at</th>
+                      <th scope="col" class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for req in artist_requests %}
+                    <tr>
+                      <td>{{ req.artist_name }}</td>
+                      <td>{{ req.requested_by.name }}</td>
+                      <td>{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                      <td class="text-end">
+                        <form method="post" action="{{ url_for('main.update_settings') }}" class="d-inline me-2">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="tab" value="requests">
+                          <input type="hidden" name="action" value="approve">
+                          <input type="hidden" name="request_id" value="{{ req.id }}">
+                          <button type="submit" class="btn btn-sm btn-success">Approve</button>
+                        </form>
+                        <form method="post" action="{{ url_for('main.update_settings') }}" class="d-inline">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="tab" value="requests">
+                          <input type="hidden" name="action" value="reject">
+                          <input type="hidden" name="request_id" value="{{ req.id }}">
+                          <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Reject request for {{ req.artist_name }}?');">Reject</button>
+                        </form>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <p class="text-muted mb-0">No pending requests.</p>
+              {% endif %}
+            </div>
+          </div>
+
+          {% elif active_tab == 'system' %}
+          <!-- System Configuration -->
+          <h2 class="h4 mb-4">System Configuration</h2>
+
+          <form method="post" action="{{ url_for('main.update_settings') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="tab" value="system">
+
+            <!-- Lidarr Connection -->
+            <div class="card mb-4">
+              <div class="card-body">
+                <h3 class="h5 mb-3">Lidarr Connection</h3>
+
+                <div class="mb-3">
+                  <label for="lidarr-address" class="form-label">Lidarr Address</label>
+                  <input type="text" class="form-control" id="lidarr-address" name="lidarr_address" placeholder="http://192.168.1.1:8686" value="{{ system_config.lidarr_address if system_config else '' }}">
+                </div>
+
+                <div class="mb-3">
+                  <label for="lidarr-api-key" class="form-label">Lidarr API Key</label>
+                  <input type="text" class="form-control" id="lidarr-api-key" name="lidarr_api_key" placeholder="Enter Lidarr API Key" value="{{ system_config.lidarr_api_key if system_config else '' }}">
+                </div>
+
+                <div class="mb-3">
+                  <label for="root-folder-path" class="form-label">Root Folder Path</label>
+                  <input type="text" class="form-control" id="root-folder-path" name="root_folder_path" placeholder="/data/media/music/" value="{{ system_config.root_folder_path if system_config else '' }}">
+                </div>
+
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label for="quality-profile-id" class="form-label">Quality Profile ID</label>
+                    <input type="number" class="form-control" id="quality-profile-id" name="quality_profile_id" min="1" value="{{ system_config.quality_profile_id if system_config else '' }}">
+                  </div>
+                  <div class="col-md-6">
+                    <label for="metadata-profile-id" class="form-label">Metadata Profile ID</label>
+                    <input type="number" class="form-control" id="metadata-profile-id" name="metadata_profile_id" min="1" value="{{ system_config.metadata_profile_id if system_config else '' }}">
+                  </div>
+                </div>
+
+                <div class="mb-3">
+                  <label for="lidarr-api-timeout" class="form-label">Lidarr API Timeout (seconds)</label>
+                  <input type="number" class="form-control" id="lidarr-api-timeout" name="lidarr_api_timeout" min="1" step="1" value="{{ system_config.lidarr_api_timeout if system_config else '' }}">
+                  <small class="form-text text-muted">How long Sonobarr waits for Lidarr before giving up.</small>
+                </div>
+
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="fallback-to-top-result" name="fallback_to_top_result" {% if system_config and system_config.fallback_to_top_result %}checked{% endif %}>
+                  <label class="form-check-label" for="fallback-to-top-result">Fallback to Lidarr's top search result when similarity is low</label>
+                </div>
+
+                <div class="form-check form-switch mb-2">
+                  <input class="form-check-input" type="checkbox" id="search-for-missing-albums" name="search_for_missing_albums" {% if system_config and system_config.search_for_missing_albums %}checked{% endif %}>
+                  <label class="form-check-label" for="search-for-missing-albums">Trigger Lidarr's "search for missing" flag on add</label>
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                  <input class="form-check-input" type="checkbox" id="dry-run-adding-to-lidarr" name="dry_run_adding_to_lidarr" {% if system_config and system_config.dry_run_adding_to_lidarr %}checked{% endif %}>
+                  <label class="form-check-label" for="dry-run-adding-to-lidarr">Dry run additions (don't call Lidarr)</label>
+                </div>
+
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label for="lidarr-monitor-option" class="form-label">Monitor Strategy</label>
+                    <select class="form-select" id="lidarr-monitor-option" name="lidarr_monitor_option">
+                      <option value="" {% if not system_config or not system_config.lidarr_monitor_option %}selected{% endif %}>Use Lidarr default</option>
+                      <option value="all" {% if system_config and system_config.lidarr_monitor_option == 'all' %}selected{% endif %}>All</option>
+                      <option value="future" {% if system_config and system_config.lidarr_monitor_option == 'future' %}selected{% endif %}>Future</option>
+                      <option value="missing" {% if system_config and system_config.lidarr_monitor_option == 'missing' %}selected{% endif %}>Missing</option>
+                      <option value="existing" {% if system_config and system_config.lidarr_monitor_option == 'existing' %}selected{% endif %}>Existing</option>
+                      <option value="latest" {% if system_config and system_config.lidarr_monitor_option == 'latest' %}selected{% endif %}>Latest</option>
+                      <option value="first" {% if system_config and system_config.lidarr_monitor_option == 'first' %}selected{% endif %}>First</option>
+                      <option value="none" {% if system_config and system_config.lidarr_monitor_option == 'none' %}selected{% endif %}>None</option>
+                      <option value="unknown" {% if system_config and system_config.lidarr_monitor_option == 'unknown' %}selected{% endif %}>Unknown</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="lidarr-monitor-new-items" class="form-label">Monitor New Items</label>
+                    <select class="form-select" id="lidarr-monitor-new-items" name="lidarr_monitor_new_items">
+                      <option value="" {% if not system_config or not system_config.lidarr_monitor_new_items %}selected{% endif %}>Use Lidarr default</option>
+                      <option value="all" {% if system_config and system_config.lidarr_monitor_new_items == 'all' %}selected{% endif %}>All</option>
+                      <option value="new" {% if system_config and system_config.lidarr_monitor_new_items == 'new' %}selected{% endif %}>New</option>
+                      <option value="none" {% if system_config and system_config.lidarr_monitor_new_items == 'none' %}selected{% endif %}>None</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                  <input class="form-check-input" type="checkbox" id="lidarr-monitored" name="lidarr_monitored" {% if system_config and system_config.lidarr_monitored %}checked{% endif %}>
+                  <label class="form-check-label" for="lidarr-monitored">Mark newly added artists as monitored</label>
+                </div>
+
+                <div class="mb-0">
+                  <label for="lidarr-albums-to-monitor" class="form-label">Albums to Monitor (optional)</label>
+                  <textarea class="form-control" id="lidarr-albums-to-monitor" name="lidarr_albums_to_monitor" rows="2" placeholder="One album ID per line">{{ system_config.lidarr_albums_to_monitor if system_config else '' }}</textarea>
+                  <small class="form-text text-muted">Leave blank to let Lidarr decide which albums to monitor.</small>
+                </div>
+              </div>
+            </div>
+
+            <!-- Discovery Behaviour -->
+            <div class="card mb-4">
+              <div class="card-body">
+                <h3 class="h5 mb-3">Discovery Behaviour</h3>
+
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label for="similar-artist-batch-size" class="form-label">Batch Size</label>
+                    <input type="number" class="form-control" id="similar-artist-batch-size" name="similar_artist_batch_size" min="1" step="1" value="{{ system_config.similar_artist_batch_size if system_config else '' }}">
+                    <small class="form-text text-muted">Cards streamed per batch.</small>
+                  </div>
+                  <div class="col-md-6">
+                    <label for="auto-start-delay" class="form-label">Auto-start Delay (seconds)</label>
+                    <input type="number" class="form-control" id="auto-start-delay" name="auto_start_delay" min="0" step="1" value="{{ system_config.auto_start_delay if system_config else '' }}">
+                  </div>
+                </div>
+
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="auto-start" name="auto_start" {% if system_config and system_config.auto_start %}checked{% endif %}>
+                  <label class="form-check-label" for="auto-start">Auto-start discovery when the page loads</label>
+                </div>
+              </div>
+            </div>
+
+            <!-- System Settings -->
+            <div class="card mb-4">
+              <div class="card-body">
+                <h3 class="h5 mb-3">System Settings</h3>
+                <p class="text-muted small mb-3">
+                  <strong>Note:</strong> External API keys (Last.fm, YouTube, LLM) are now configured per-user in Profile settings.
+                </p>
+
+                <div class="mb-0">
+                  <label for="api-key" class="form-label">System API Key</label>
+                  <input type="text" class="form-control" id="api-key" name="api_key" placeholder="Enter API Key for external integrations" value="{{ system_config.api_key if system_config else '' }}">
+                  <small class="form-text text-muted">Global API key for REST API endpoints. Users can also have individual API keys.</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+              <a href="{{ url_for('main.settings', tab='system') }}" class="btn btn-outline-secondary">Cancel</a>
+              <button type="submit" class="btn btn-primary">Save Configuration</button>
+            </div>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('main.update_settings') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="tab" value="users">
+        <input type="hidden" name="action" value="edit">
+        <input type="hidden" name="user_id" id="edit_user_id">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="editUserModalLabel">Edit User</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Username</label>
+            <p class="form-control-plaintext" id="edit_username_display"></p>
+          </div>
+
+          <div class="mb-3">
+            <label for="edit_display_name" class="form-label">Display name</label>
+            <input type="text" class="form-control" id="edit_display_name" name="display_name">
+          </div>
+
+          <div class="mb-3">
+            <label for="edit_avatar_url" class="form-label">Profile image URL</label>
+            <input type="url" class="form-control" id="edit_avatar_url" name="avatar_url" placeholder="https://example.com/avatar.png">
+          </div>
+
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active">
+            <label class="form-check-label" for="edit_is_active">Active account</label>
+          </div>
+
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="edit_is_admin" name="is_admin">
+            <label class="form-check-label" for="edit_is_admin">Admin privileges</label>
+          </div>
+
+          <div class="alert alert-warning py-2 px-3 small mb-0" id="oidc_warning" style="display: none;">
+            <strong>⚠️ Note:</strong> This user authenticates via OIDC SSO. Admin status will be re-synced on their next login based on SSO group membership.
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% block extra_scripts %}
+<script>
+// Populate the edit modal with user data when opened
+const editUserModal = document.getElementById('editUserModal');
+if (editUserModal) {
+  editUserModal.addEventListener('show.bs.modal', function (event) {
+    const button = event.relatedTarget;
+    const userId = button.getAttribute('data-user-id');
+    const username = button.getAttribute('data-user-username');
+    const displayName = button.getAttribute('data-user-displayname');
+    const avatarUrl = button.getAttribute('data-user-avatarurl');
+    const isAdmin = button.getAttribute('data-user-isadmin') === 'true';
+    const isActive = button.getAttribute('data-user-isactive') === 'true';
+    const isOidc = button.getAttribute('data-user-isoidc') === 'true';
+
+    document.getElementById('edit_user_id').value = userId;
+    document.getElementById('edit_username_display').textContent = username;
+    document.getElementById('edit_display_name').value = displayName;
+    document.getElementById('edit_avatar_url').value = avatarUrl;
+    document.getElementById('edit_is_admin').checked = isAdmin;
+    document.getElementById('edit_is_active').checked = isActive;
+
+    // Show/hide OIDC warning
+    const oidcWarning = document.getElementById('oidc_warning');
+    if (isOidc) {
+      oidcWarning.style.display = 'block';
+    } else {
+      oidcWarning.style.display = 'none';
+    }
+  });
+}
+</script>
+{% endblock %}
+
+{% endblock %}
