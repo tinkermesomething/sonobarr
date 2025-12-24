@@ -5,7 +5,7 @@ from typing import Any
 
 from flask import request
 from flask_login import current_user
-from flask_socketio import SocketIO, disconnect
+from flask_socketio import SocketIO, disconnect, emit
 
 
 def register_socketio_handlers(socketio: SocketIO, data_handler) -> None:
@@ -40,6 +40,27 @@ def register_socketio_handlers(socketio: SocketIO, data_handler) -> None:
         sid = request.sid
 
         socketio.start_background_task(data_handler.get_artists_from_lidarr, sid)
+
+    @socketio.on("search_artists")
+    def handle_search_artists(query: Any):
+        if not current_user.is_authenticated:
+            disconnect()
+            return
+        sid = request.sid
+
+        # Extract query string
+        if isinstance(query, dict):
+            search_query = query.get("query", "")
+        else:
+            search_query = str(query or "")
+
+        if not search_query or not search_query.strip():
+            emit("search_results", {"status": "error", "message": "Search query cannot be empty", "artists": []}, room=sid)
+            return
+
+        # Perform search and format as artist cards
+        artists = data_handler.search_artists_musicbrainz(search_query.strip(), limit=20)
+        emit("search_results", {"status": "success", "artists": artists}, room=sid)
 
     @socketio.on("start_req")
     def handle_start_req(selected_artists: Any):

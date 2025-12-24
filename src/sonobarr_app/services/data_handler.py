@@ -95,6 +95,9 @@ class DataHandler:
         self.pylast_logger = logging.getLogger("pylast")
         self.pylast_logger.setLevel(logging.WARNING)
 
+        # Configure MusicBrainz user-agent (required by API)
+        musicbrainzngs.set_useragent("Sonobarr", "0.10", "https://github.com/Dodelidoo-Labs/sonobarr")
+
         app_name_text = Path(__file__).name.replace(".py", "")
         release_version = (app_config.get("APP_VERSION") or get_env_value("release_version", "unknown") or "unknown")
         if not DataHandler._version_logged:
@@ -1812,6 +1815,57 @@ class DataHandler:
                     )
 
         return mbid
+
+    def search_artists_musicbrainz(self, query: str, limit: int = 10) -> list[dict]:
+        """Search for artists on MusicBrainz and return formatted results for artist cards."""
+        try:
+            result = musicbrainzngs.search_artists(artist=query, limit=limit)
+            formatted_results = []
+
+            if "artist-list" in result:
+                for artist in result["artist-list"]:
+                    artist_name = artist.get("name", "Unknown")
+
+                    # Build genre info from type and country
+                    genre_parts = []
+                    if artist.get("type"):
+                        genre_parts.append(artist["type"])
+                    if artist.get("country"):
+                        genre_parts.append(artist["country"])
+                    genre = " • ".join(genre_parts) if genre_parts else "Unknown"
+
+                    # Extract life-span for followers field
+                    life_span = artist.get("life-span", {})
+                    begin = life_span.get("begin", "")
+                    end = life_span.get("end", "")
+
+                    followers = ""
+                    if begin and end:
+                        followers = f"{begin}–{end}"
+                    elif begin:
+                        followers = f"{begin}–present"
+
+                    # Build popularity from disambiguation
+                    popularity = artist.get("disambiguation", "Search Result")
+
+                    # Format as artist card data
+                    artist_data = {
+                        "Name": artist_name,
+                        "Genre": genre,
+                        "Img_Link": None,  # No images from MusicBrainz search
+                        "Followers": followers,
+                        "Popularity": popularity,
+                        "Status": "",  # Will be checked against Lidarr library
+                    }
+
+                    formatted_results.append(artist_data)
+
+            self.logger.info("MusicBrainz search for '%s' returned %d results", query, len(formatted_results))
+            return formatted_results
+
+        except Exception as exc:
+            self.logger.exception("Failed to search MusicBrainz for '%s': %s", query, exc)
+            return []
 
     def load_environ_or_config_settings(self) -> None:
         default_settings = {

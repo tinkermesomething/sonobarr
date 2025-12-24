@@ -17,7 +17,17 @@ bp = Blueprint("main", __name__)
 @bp.route("/")
 @login_required
 def home():
-    return render_template("base.html")
+    # Check which discovery tools are available based on user's configured API keys
+    has_ai_enabled = bool(current_user.openai_api_key)
+    has_lastfm_enabled = bool(current_user.lastfm_api_key and current_user.lastfm_username)
+    has_listenbrainz_enabled = bool(current_user.listenbrainz_username)
+
+    return render_template(
+        "base.html",
+        has_ai_enabled=has_ai_enabled,
+        has_lastfm_enabled=has_lastfm_enabled,
+        has_listenbrainz_enabled=has_listenbrainz_enabled,
+    )
 
 
 @bp.get("/settings")
