@@ -75,31 +75,11 @@
               <ul class="dropdown-menu dropdown-menu-end shadow-sm">
                 <li class="dropdown-header text-truncate">{{ current_user.display_name or current_user.username }}</li>
                 <li>
-                  <a class="dropdown-item d-flex align-items-center gap-2" href="{{ url_for('main.profile') }}">
-                    <i class="fa-solid fa-id-card"></i>
-                    <span>Profile</span>
-                  </a>
-                </li>
-                {% if current_user.is_admin %}
-                <li>
-                  <a class="dropdown-item d-flex align-items-center gap-2" href="{{ url_for('admin.users') }}">
-                    <i class="fa-solid fa-users-gear"></i>
-                    <span>User management</span>
-                  </a>
-                </li>
-                <li>
-                  <a class="dropdown-item d-flex align-items-center gap-2" href="{{ url_for('admin.artist_requests') }}">
-                    <i class="fa-solid fa-music"></i>
-                    <span>Artist requests</span>
-                  </a>
-                </li>
-                <li>
-                  <button type="button" class="dropdown-item d-flex align-items-center gap-2" id="settings-button" data-bs-toggle="modal" data-bs-target="#config-modal">
+                  <a class="dropdown-item d-flex align-items-center gap-2" href="{{ url_for('main.settings') }}">
                     <i class="fa-solid fa-gear"></i>
-                    <span>Configuration</span>
-                  </button>
+                    <span>Settings</span>
+                  </a>
                 </li>
-                {% endif %}
                 <li><hr class="dropdown-divider"></li>
                 <li class="px-3 py-2">
                   <div class="dropdown-theme-toggle d-flex align-items-center justify-content-between gap-3">

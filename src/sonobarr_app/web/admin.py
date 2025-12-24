@@ -190,50 +190,29 @@ def _reject_artist_request(artist_request: ArtistRequest):
 @login_required
 @admin_required
 def users():
-    users_list = User.query.order_by(User.username.asc()).all()
-    return render_template("admin_users.html", users=users_list)
+    # Redirect to new unified settings page
+    return redirect(url_for("main.settings", tab="users"))
 
 
 @bp.post("/users")
 @login_required
 @admin_required
 def modify_users():
-    action = request.form.get("action")
-    if action == "create":
-        _create_user_from_form(request.form)
-    elif action == "edit":
-        _edit_user_from_form(request.form)
-    elif action == "delete":
-        _delete_user_from_form(request.form)
-    else:
-        flash("Invalid action.", "danger")
-    return redirect(url_for("admin.users"))
+    # Redirect to new unified settings page
+    return redirect(url_for("main.settings", tab="users"))
 
 
 @bp.get("/artist-requests")
 @login_required
 @admin_required
 def artist_requests():
-    pending_requests = ArtistRequest.query.filter_by(status="pending").order_by(
-        ArtistRequest.created_at.desc()
-    ).all()
-    return render_template("admin_artist_requests.html", requests=pending_requests)
+    # Redirect to new unified settings page
+    return redirect(url_for("main.settings", tab="requests"))
 
 
 @bp.post("/artist-requests")
 @login_required
 @admin_required
 def modify_artist_requests():
-    action = request.form.get("action")
-    artist_request = _resolve_artist_request(request.form)
-    if not artist_request:
-        return redirect(url_for("admin.artist_requests"))
-
-    if action == "approve":
-        _approve_artist_request(artist_request)
-    elif action == "reject":
-        _reject_artist_request(artist_request)
-    else:
-        flash("Invalid action.", "danger")
-
-    return redirect(url_for("admin.artist_requests"))
+    # Redirect to new unified settings page
+    return redirect(url_for("main.settings", tab="requests"))
