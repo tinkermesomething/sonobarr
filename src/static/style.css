@@ -15,11 +15,18 @@ body {
 .top-bar {
     min-height: 4.25rem;
     padding-inline: 1rem;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 1rem;
 }
 
-.topbar-leading,
+.topbar-leading {
+    justify-self: start;
+}
+
 .topbar-actions {
-    min-width: 3rem;
+    justify-self: end;
 }
 
 .btn-icon {
@@ -159,49 +166,6 @@ body {
 .logo {
     width: 60px;
     margin-right: 0px;
-}
-
-.discovery-sidebar .sidebar-section {
-    background-color: rgba(var(--bs-body-color-rgb, 33, 37, 41), .05);
-    border: 1px solid rgba(var(--bs-body-color-rgb, 33, 37, 41), .08);
-    border-radius: 1rem;
-    padding: 1.25rem;
-}
-
-[data-bs-theme="dark"] .discovery-sidebar .sidebar-section {
-    background-color: rgba(255, 255, 255, .04);
-    border-color: rgba(255, 255, 255, .08);
-}
-
-.discovery-sidebar .sidebar-section-title {
-    font-size: .75rem;
-    font-weight: 700;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-    margin-bottom: .75rem;
-}
-
-.discovery-sidebar .sidebar-section-subtitle {
-    line-height: 1.4;
-}
-
-.discovery-sidebar .sidebar-status {
-    min-height: 1.5rem;
-}
-
-.discovery-sidebar .sidebar-queue {
-    min-height: 12rem;
-}
-
-.discovery-sidebar #lidarr-item-list {
-    border-radius: .75rem;
-    border: 1px dashed rgba(var(--bs-body-color-rgb, 33, 37, 41), .15);
-    background-color: rgba(var(--bs-body-bg-rgb, 248, 249, 250), .6);
-}
-
-[data-bs-theme="dark"] .discovery-sidebar #lidarr-item-list {
-    border-color: rgba(255, 255, 255, .12);
-    background-color: rgba(255, 255, 255, .04);
 }
 
 .scrollable-content {

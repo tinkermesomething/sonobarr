@@ -14,9 +14,16 @@ var lidarr_select_all_checkbox = document.getElementById('lidarr-select-all');
 var lidarr_select_all_container = document.getElementById(
 	'lidarr-select-all-container'
 );
+var lidarr_quick_add_input = document.getElementById('lidarr-quick-add-input');
+var lidarr_artists_datalist = document.getElementById('lidarr-artists-datalist');
+var lidarr_quick_add_bubbles = document.getElementById('lidarr-quick-add-bubbles');
+var lidarr_queue_count = document.getElementById('lidarr-queue-count');
+var lidarr_search_input = document.getElementById('lidarr-search-input');
+var lidarr_search_button = document.getElementById('lidarr-search-button');
+var clear_search_button = document.getElementById('clear-search-button');
+var search_artists_modal = document.getElementById('search-artists-modal');
 
 var config_modal = document.getElementById('config-modal');
-var lidarr_sidebar = document.getElementById('lidarr-sidebar');
 
 const START_LABEL = 'Start discovery';
 const STOP_LABEL = 'Stop';
@@ -74,15 +81,11 @@ const personalLastfmButton = document.getElementById('personal-lastfm-button');
 const personalLastfmSpinner = document.getElementById(
 	'personal-lastfm-spinner'
 );
-const personalLastfmHint = document.getElementById('personal-lastfm-hint');
 const personalListenbrainzButton = document.getElementById(
 	'personal-listenbrainz-button'
 );
 const personalListenbrainzSpinner = document.getElementById(
 	'personal-listenbrainz-spinner'
-);
-const personalListenbrainzHint = document.getElementById(
-	'personal-listenbrainz-hint'
 );
 
 const personalDiscoveryServices = {
@@ -90,17 +93,13 @@ const personalDiscoveryServices = {
 		label: 'Last.fm',
 		button: personalLastfmButton,
 		spinner: personalLastfmSpinner,
-		hint: personalLastfmHint,
-		readyTitle: 'Stream recommendations from your Last.fm profile.',
-		readyHint: 'Ready to use your Last.fm listening history.',
+		readyTitle: 'Discover from your Last.fm profile',
 	},
 	listenbrainz: {
 		label: 'ListenBrainz',
 		button: personalListenbrainzButton,
 		spinner: personalListenbrainzSpinner,
-		hint: personalListenbrainzHint,
-		readyTitle: 'Stream ListenBrainz weekly exploration picks.',
-		readyHint: 'Ready to use ListenBrainz weekly exploration.',
+		readyTitle: 'Discover from your ListenBrainz weekly picks',
 	},
 };
 
@@ -207,6 +206,10 @@ updatePersonalButtons();
 
 socket.on('connect', function () {
 	socket.emit('personal_sources_poll');
+	// Auto-refresh Lidarr artists on page load (only on home page)
+	if (lidarr_get_artists_button) {
+		socket.emit('get_lidarr_artists');
+	}
 });
 
 socket.on('user_info', function (data) {
@@ -363,43 +366,26 @@ function updatePersonalButtons() {
 		if (!serviceState) {
 			button.disabled = true;
 			button.title = 'Loading availability...';
-			set_hint_text(controls.hint, '');
 			return;
 		}
 		var label = getPersonalServiceLabel(source);
 		var enabled = !!serviceState.enabled;
 		var loading = isBusy && personalDiscoveryState.source === source;
 		var readyTitle =
-			controls.readyTitle || 'Stream personalised recommendations.';
+			controls.readyTitle || 'Discover from your personal profile';
 		if (loading) {
 			button.title = 'Personal discovery in progress...';
 		} else if (enabled) {
-			button.title = readyTitle;
+			// Show username in title if available
+			if (serviceState.username) {
+				button.title = readyTitle + ' (' + serviceState.username + ')';
+			} else {
+				button.title = readyTitle;
+			}
 		} else {
-			button.title = serviceState.reason || readyTitle;
+			button.title = serviceState.reason || 'Configure credentials in Settings → Profile';
 		}
 		button.disabled = !enabled || isBusy;
-		if (enabled) {
-			var readyMessage = '';
-			if (serviceState.username) {
-				readyMessage =
-					'Ready with ' +
-					label +
-					' profile ' +
-					serviceState.username +
-					'.';
-			} else if (controls.readyHint) {
-				readyMessage = controls.readyHint;
-			} else {
-				readyMessage =
-					'Ready to use your ' +
-					label.toLowerCase() +
-					' listening history.';
-			}
-			set_hint_text(controls.hint, readyMessage);
-		} else {
-			set_hint_text(controls.hint, serviceState.reason || '');
-		}
 	});
 }
 
@@ -859,7 +845,14 @@ if (lidarr_select_all_checkbox) {
 		var checkboxes = document.querySelectorAll('input[name="lidarr-item"]');
 		checkboxes.forEach(function (checkbox) {
 			checkbox.checked = is_checked;
+			var artistName = checkbox.value;
+			if (is_checked) {
+				addArtistBubble(artistName);
+			} else {
+				removeArtistBubble(artistName);
+			}
 		});
+		updateQueueCount();
 	});
 }
 
@@ -1194,13 +1187,205 @@ if (settings_form && config_modal) {
 	socket.on('settingsSaveError', handle_settings_save_error);
 }
 
-// Discovery sidebar only exists on main page
-if (lidarr_sidebar) {
-	lidarr_sidebar.addEventListener('show.bs.offcanvas', function (event) {
-		socket.emit('side_bar_opened');
-		socket.emit('personal_sources_poll');
+// Lidarr Quick Add Functions
+
+function updateQueueCount() {
+	if (!lidarr_queue_count) return;
+	var checkboxes = document.querySelectorAll('input[name="lidarr-item"]:checked');
+	var count = checkboxes.length;
+	lidarr_queue_count.textContent = count;
+}
+
+function findCheckboxByArtist(artistName) {
+	var checkboxes = document.querySelectorAll('input[name="lidarr-item"]');
+	for (var i = 0; i < checkboxes.length; i++) {
+		if (checkboxes[i].value === artistName) {
+			return checkboxes[i];
+		}
+	}
+	return null;
+}
+
+function addArtistBubble(artistName) {
+	if (!lidarr_quick_add_bubbles || !artistName) return;
+
+	// Check if bubble already exists
+	var existingBubble = lidarr_quick_add_bubbles.querySelector(`[data-artist="${CSS.escape(artistName)}"]`);
+	if (existingBubble) return;
+
+	// Create bubble element
+	var bubble = document.createElement('span');
+	bubble.className = 'badge bg-primary d-inline-flex align-items-center gap-1';
+	bubble.dataset.artist = artistName;
+	bubble.innerHTML = `
+		<span>${artistName}</span>
+		<button type="button" class="btn-close btn-close-white" style="font-size: 0.65rem; padding: 0.15rem;"
+		        aria-label="Remove ${artistName}"></button>
+	`;
+
+	// Add click handler to remove button
+	var removeBtn = bubble.querySelector('.btn-close');
+	removeBtn.addEventListener('click', function() {
+		removeArtistBubble(artistName);
+	});
+
+	lidarr_quick_add_bubbles.appendChild(bubble);
+
+	// Auto-check the corresponding checkbox
+	var checkbox = findCheckboxByArtist(artistName);
+	if (checkbox && !checkbox.checked) {
+		checkbox.checked = true;
+		updateQueueCount();
+		check_if_all_selected();
+	}
+}
+
+function removeArtistBubble(artistName) {
+	if (!lidarr_quick_add_bubbles || !artistName) return;
+
+	// Remove bubble
+	var bubble = lidarr_quick_add_bubbles.querySelector(`[data-artist="${CSS.escape(artistName)}"]`);
+	if (bubble) {
+		bubble.remove();
+	}
+
+	// Uncheck the corresponding checkbox
+	var checkbox = findCheckboxByArtist(artistName);
+	if (checkbox && checkbox.checked) {
+		checkbox.checked = false;
+		updateQueueCount();
+		check_if_all_selected();
+	}
+}
+
+// Quick add input handler
+if (lidarr_quick_add_input) {
+	lidarr_quick_add_input.addEventListener('change', function() {
+		var artistName = this.value.trim();
+		if (artistName) {
+			addArtistBubble(artistName);
+			this.value = ''; // Clear input after adding
+		}
+	});
+
+	// Also handle Enter key
+	lidarr_quick_add_input.addEventListener('keydown', function(e) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			var artistName = this.value.trim();
+			if (artistName) {
+				addArtistBubble(artistName);
+				this.value = '';
+			}
+		}
 	});
 }
+
+// Artist Search Functions
+
+function performArtistSearch() {
+	if (!lidarr_search_input || !lidarr_search_button) return;
+
+	var query = lidarr_search_input.value.trim();
+	if (!query) return;
+
+	// Clear the main page
+	clear_all();
+
+	// Show loading spinner on main page
+	if (header_spinner) {
+		header_spinner.classList.remove('d-none');
+	}
+
+	// Close the search modal
+	if (search_artists_modal) {
+		var modalInstance = bootstrap.Modal.getOrCreateInstance(search_artists_modal);
+		modalInstance.hide();
+	}
+
+	// Emit search request
+	socket.emit('search_artists', { query: query });
+}
+
+function displaySearchResults(artists) {
+	// Hide loading spinner
+	if (header_spinner) {
+		header_spinner.classList.add('d-none');
+	}
+
+	if (!artists || artists.length === 0) {
+		// Show no results message on main page
+		var artist_row = document.getElementById('artist-row');
+		if (artist_row) {
+			var noResultsDiv = document.createElement('div');
+			noResultsDiv.className = 'col-12 text-center text-secondary py-5';
+			noResultsDiv.innerHTML = `
+				<i class="fa-solid fa-circle-exclamation fa-3x mb-3"></i>
+				<h4>No artists found</h4>
+				<p class="text-muted">Try a different search term or explore discovery options.</p>
+			`;
+			artist_row.appendChild(noResultsDiv);
+		}
+		return;
+	}
+
+	// Display artists as cards on main page
+	append_artists(artists);
+}
+
+function clearSearch() {
+	// Clear search input
+	if (lidarr_search_input) {
+		lidarr_search_input.value = '';
+	}
+}
+
+// Search button click handler
+if (lidarr_search_button) {
+	lidarr_search_button.addEventListener('click', performArtistSearch);
+}
+
+// Search input Enter key handler
+if (lidarr_search_input) {
+	lidarr_search_input.addEventListener('keydown', function(e) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			performArtistSearch();
+		}
+	});
+}
+
+// Clear search button handler (resets input when modal reopens)
+if (clear_search_button) {
+	clear_search_button.addEventListener('click', clearSearch);
+}
+
+// Socket.IO handler for search results
+socket.on('search_results', function(data) {
+	if (data.status === 'success') {
+		displaySearchResults(data.artists || []);
+	} else {
+		// Hide loading spinner
+		if (header_spinner) {
+			header_spinner.classList.add('d-none');
+		}
+
+		// Show error message on main page
+		var artist_row = document.getElementById('artist-row');
+		if (artist_row) {
+			var errorDiv = document.createElement('div');
+			errorDiv.className = 'col-12 text-center text-warning py-5';
+			errorDiv.innerHTML = `
+				<i class="fa-solid fa-triangle-exclamation fa-3x mb-3"></i>
+				<h4>Search Error</h4>
+				<p class="text-muted">${data.message || 'Search failed. Please try again.'}</p>
+			`;
+			artist_row.appendChild(errorDiv);
+		}
+	}
+});
+
+// Personal discovery state is polled on socket connect (see line ~209)
 
 socket.on('lidarr_sidebar_update', (response) => {
 	if (response.Status == 'Success') {
@@ -1209,9 +1394,27 @@ socket.on('lidarr_sidebar_update', (response) => {
 		lidarr_item_list.innerHTML = '';
 		lidarr_select_all_container.classList.remove('d-none');
 
+		// Populate datalist for autocomplete
+		if (lidarr_artists_datalist) {
+			lidarr_artists_datalist.innerHTML = '';
+		}
+
+		// Clear existing bubbles
+		if (lidarr_quick_add_bubbles) {
+			lidarr_quick_add_bubbles.innerHTML = '';
+		}
+
 		for (var i = 0; i < lidarr_items.length; i++) {
 			var item = lidarr_items[i];
 
+			// Add to datalist for autocomplete
+			if (lidarr_artists_datalist) {
+				var option = document.createElement('option');
+				option.value = item.name;
+				lidarr_artists_datalist.appendChild(option);
+			}
+
+			// Create checkbox
 			var div = document.createElement('div');
 			div.className = 'form-check';
 
@@ -1232,6 +1435,14 @@ socket.on('lidarr_sidebar_update', (response) => {
 			label.textContent = item.name;
 
 			input.addEventListener('change', function () {
+				var artistName = this.value;
+				if (this.checked) {
+					// Add bubble when checkbox is checked
+					addArtistBubble(artistName);
+				} else {
+					// Remove bubble when checkbox is unchecked
+					removeArtistBubble(artistName);
+				}
 				check_if_all_selected();
 			});
 
@@ -1239,7 +1450,15 @@ socket.on('lidarr_sidebar_update', (response) => {
 			div.appendChild(label);
 
 			lidarr_item_list.appendChild(div);
+
+			// Restore bubbles for checked items
+			if (item.checked) {
+				addArtistBubble(item.name);
+			}
 		}
+
+		// Update queue count
+		updateQueueCount();
 	} else {
 		lidarr_status.textContent = response.Code;
 	}

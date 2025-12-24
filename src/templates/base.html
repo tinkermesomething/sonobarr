@@ -1,9 +1,99 @@
 {% extends "layout.html" %}
 {% block title %}Sonobarr{% endblock %}
 {% block topbar_leading %}
-<button class="btn btn-outline-light btn-icon" type="button" data-bs-toggle="offcanvas"
-        data-bs-target="#lidarr-sidebar" aria-controls="lidarr-sidebar" title="Discovery controls">
-  <i class="fa fa-magnifying-glass fa-lg"></i>
+<!-- Lidarr Dropdown -->
+<div class="dropdown">
+  <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="lidarr-dropdown" data-bs-toggle="dropdown" aria-expanded="false">
+    <i class="fa-solid fa-compact-disc"></i>
+    <span class="d-none d-lg-inline ms-1">Lidarr</span>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-start shadow-sm p-3" style="min-width: 350px;">
+    <!-- Refresh Button -->
+    <li class="mb-3">
+      <button class="btn btn-outline-primary w-100 btn-sm" id="lidarr-get-artists-button" type="button">
+        <span class="spinner-border spinner-border-sm d-none" id="lidarr-spinner" role="status" aria-hidden="true"></span>
+        <i class="fa-solid fa-arrows-rotate me-1"></i>
+        Refresh Artists
+      </button>
+    </li>
+
+    <!-- Quick Add Section -->
+    <li class="mb-3">
+      <div class="dropdown-header px-0 pb-2">Quick Add</div>
+      <input type="text" class="form-control form-control-sm mb-2" id="lidarr-quick-add-input"
+             placeholder="Type to search artists..."
+             list="lidarr-artists-datalist"
+             autocomplete="off">
+      <datalist id="lidarr-artists-datalist"></datalist>
+      <div id="lidarr-quick-add-bubbles" class="d-flex flex-wrap gap-2 mt-2" style="min-height: 32px;"></div>
+    </li>
+
+    <li><hr class="dropdown-divider my-2"></li>
+
+    <!-- Queued Artists Section -->
+    <li class="mb-2">
+      <div class="dropdown-header px-0 pb-2">
+        <span>Queued Artists</span>
+        <span class="badge bg-secondary ms-2" id="lidarr-queue-count">0</span>
+      </div>
+      <div id="lidarr-select-all-container" class="d-flex align-items-center gap-2 mb-2 d-none">
+        <div class="form-check mb-0">
+          <input type="checkbox" class="form-check-input" id="lidarr-select-all">
+          <label class="form-check-label small" for="lidarr-select-all">Select all</label>
+        </div>
+      </div>
+      <div id="lidarr-item-list" class="p-2 bg-body-tertiary rounded" style="max-height: 250px; overflow-y: auto;"></div>
+    </li>
+
+    <li><hr class="dropdown-divider my-2"></li>
+
+    <!-- Start Discovery Button -->
+    <li class="mb-2">
+      <button class="btn btn-success w-100" id="start-stop-button" type="button">Start Discovery</button>
+    </li>
+
+    <!-- Status -->
+    <li class="small text-secondary text-center">
+      <span id="lidarr-status"></span>
+    </li>
+  </ul>
+</div>
+
+<!-- Last.fm Discovery Button -->
+<button class="btn btn-outline-light btn-sm" id="personal-lastfm-button" type="button"
+        {% if not has_lastfm_enabled %}disabled{% endif %}
+        title="{% if has_lastfm_enabled %}Discover from your Last.fm profile{% else %}Configure Last.fm API key and username in Settings → Profile{% endif %}">
+  <span class="spinner-border spinner-border-sm d-none" id="personal-lastfm-spinner" role="status" aria-hidden="true"></span>
+  <i class="fa-brands fa-lastfm"></i>
+  <span class="d-none d-lg-inline ms-1">Last.fm</span>
+</button>
+
+<!-- ListenBrainz Discovery Button -->
+<button class="btn btn-outline-light btn-sm" id="personal-listenbrainz-button" type="button"
+        {% if not has_listenbrainz_enabled %}disabled{% endif %}
+        title="{% if has_listenbrainz_enabled %}Discover from your ListenBrainz weekly picks{% else %}Configure ListenBrainz username in Settings → Profile{% endif %}">
+  <span class="spinner-border spinner-border-sm d-none" id="personal-listenbrainz-spinner" role="status" aria-hidden="true"></span>
+  <i class="fa-solid fa-headphones"></i>
+  <span class="d-none d-lg-inline ms-1">ListenBrainz</span>
+</button>
+
+<!-- AI Assist Button -->
+<button class="btn btn-outline-light btn-sm" id="ai-assist-button" type="button"
+        {% if not has_ai_enabled %}disabled{% endif %}
+        data-bs-toggle="modal"
+        data-bs-target="{% if has_ai_enabled %}#ai-helper-modal{% endif %}"
+        title="{% if has_ai_enabled %}Get AI-powered artist suggestions{% else %}Configure OpenAI API key in Settings → Profile{% endif %}">
+  <i class="fa-solid fa-wand-magic-sparkles"></i>
+  <span class="d-none d-lg-inline ms-1">AI Assist</span>
+</button>
+
+<!-- Search Artists Button -->
+<button class="btn btn-outline-light btn-sm" id="search-artists-button" type="button"
+        data-bs-toggle="modal"
+        data-bs-target="#search-artists-modal"
+        title="Search for artists on MusicBrainz">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <span class="d-none d-lg-inline ms-1">Search</span>
 </button>
 {% endblock %}
 {% block topbar_title %}
@@ -22,77 +112,7 @@
 {% block topbar_actions %}{% endblock %}
 {% block main %}
 
-  <!-- Discovery Sidebar -->
-  <div class="offcanvas offcanvas-start discovery-sidebar" tabindex="-1" id="lidarr-sidebar" aria-labelledby="lidarr-sidebar-label">
-    <div class="offcanvas-header border-bottom">
-      <div class="d-flex flex-column">
-        <h2 class="offcanvas-title fs-5 mb-1" id="lidarr-sidebar-label">Discovery console</h2>
-        <p class="text-secondary mb-0 small">Stream AI ideas, keep Lidarr in sync, and manage your queue from one place.</p>
-      </div>
-      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-    </div>
-    <div class="offcanvas-body d-flex flex-column gap-4">
-      <section class="sidebar-section">
-        <p class="sidebar-section-title text-uppercase">Discovery tools</p>
-        <p class="sidebar-section-subtitle small text-secondary mb-3">Kick off an AI-assisted session or tap into your own listening history without leaving the wall.</p>
-        <div class="d-grid gap-2 mb-3">
-          <button class="btn btn-outline-primary w-100" id="ai-assist-button" type="button" data-bs-toggle="modal" data-bs-target="#ai-helper-modal">
-            <i class="fa fa-magic me-2"></i>
-            AI Assist
-          </button>
-        </div>
-        <div class="personal-discovery-controls d-flex flex-column gap-3 mt-3">
-          <div class="d-flex flex-column gap-1">
-            <button class="btn btn-outline-danger w-100 d-flex align-items-center justify-content-center gap-2" id="personal-lastfm-button" type="button" disabled>
-              <span class="spinner-border spinner-border-sm d-none" id="personal-lastfm-spinner" role="status" aria-hidden="true"></span>
-              <i class="fa-brands fa-lastfm"></i>
-              <span>Last.fm for me</span>
-            </button>
-            <div class="small text-secondary d-none" id="personal-lastfm-hint"></div>
-          </div>
-          <div class="d-flex flex-column gap-1">
-            <button class="btn btn-outline-success w-100 d-flex align-items-center justify-content-center gap-2" id="personal-listenbrainz-button" type="button" disabled>
-              <span class="spinner-border spinner-border-sm d-none" id="personal-listenbrainz-spinner" role="status" aria-hidden="true"></span>
-              <i class="fa fa-headphones"></i>
-              <span>ListenBrainz for me</span>
-            </button>
-            <div class="small text-secondary d-none" id="personal-listenbrainz-hint"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="sidebar-section">
-        <p class="sidebar-section-title text-uppercase">Library sync</p>
-        <div class="d-grid gap-2">
-          <button class="btn btn-primary w-100" id="lidarr-get-artists-button" type="button">
-            <span class="spinner-border spinner-border-sm d-none" id="lidarr-spinner" role="status" aria-hidden="true"></span>
-            Get Lidarr Artists
-          </button>
-          <button class="btn btn-success w-100" id="start-stop-button" type="button">Start discovery</button>
-        </div>
-        <div class="sidebar-status small text-secondary-emphasis mt-3">
-          <span id="lidarr-status"></span>
-        </div>
-      </section>
-
-      <section class="sidebar-section">
-        <p class="sidebar-section-title text-uppercase">Selection</p>
-        <div id="lidarr-select-all-container" class="d-flex align-items-center justify-content-between gap-2 d-none">
-          <div class="form-check mb-0">
-            <input type="checkbox" class="form-check-input" id="lidarr-select-all">
-            <label class="form-check-label" for="lidarr-select-all">Select all</label>
-          </div>
-        </div>
-      </section>
-
-      <section class="sidebar-section sidebar-queue flex-grow-1 d-flex flex-column">
-        <p class="sidebar-section-title text-uppercase">Queued artists</p>
-        <div id="lidarr-item-list" class="scrollable-content flex-grow-1 p-2 bg-body-tertiary rounded-4"></div>
-      </section>
-    </div>
-  </div>
-
-  <!-- Artits Cards -->
+  <!-- Artist Cards -->
   <div class="container-fluid py-4 px-4" id="artist-container">
     <div class="row g-4 row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xxl-5" id="artist-row">
       <template id="artist-template">
@@ -156,6 +176,37 @@
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search Artists Modal -->
+  <div class="modal fade" id="search-artists-modal" tabindex="-1" aria-labelledby="search-artists-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="search-artists-title">Search for Artists</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Search MusicBrainz to discover new artists. Results will display on the main page where you can add them to Lidarr.
+          </p>
+
+          <!-- Search Input -->
+          <div class="input-group">
+            <input type="text" class="form-control" id="lidarr-search-input"
+                   placeholder="Search for an artist..."
+                   autocomplete="off">
+            <button class="btn btn-primary" id="lidarr-search-button" type="button">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span class="ms-1">Search</span>
+            </button>
+            <button class="btn btn-outline-secondary" id="clear-search-button" type="button" title="Clear search">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
