@@ -321,6 +321,110 @@ class DataHandler:
         except (TypeError, ValueError):
             return None
 
+    # Per-user API key getters with global fallback ----------------------
+    def get_lastfm_api_key(self, user: Optional[User] = None) -> str:
+        """Return user's Last.fm API key if set, else fall back to global."""
+        if user and getattr(user, 'lastfm_api_key', None):
+            return user.lastfm_api_key
+        return self.last_fm_api_key
+
+    def get_lastfm_api_secret(self, user: Optional[User] = None) -> str:
+        """Return user's Last.fm API secret if set, else fall back to global."""
+        if user and getattr(user, 'lastfm_api_secret', None):
+            return user.lastfm_api_secret
+        return self.last_fm_api_secret
+
+    def get_youtube_api_key(self, user: Optional[User] = None) -> str:
+        """Return user's YouTube API key if set, else fall back to global."""
+        if user and getattr(user, 'youtube_api_key', None):
+            return user.youtube_api_key
+        return self.youtube_api_key
+
+    def get_openai_api_key(self, user: Optional[User] = None) -> str:
+        """Return user's OpenAI API key if set, else fall back to global."""
+        if user and getattr(user, 'openai_api_key', None):
+            return user.openai_api_key
+        return self.openai_api_key
+
+    def get_openai_api_base(self, user: Optional[User] = None) -> str:
+        """Return user's OpenAI API base if set, else fall back to global."""
+        if user and getattr(user, 'openai_api_base', None):
+            return user.openai_api_base
+        return self.openai_api_base
+
+    def get_openai_model(self, user: Optional[User] = None) -> str:
+        """Return user's OpenAI model if set, else fall back to global."""
+        if user and getattr(user, 'openai_model', None):
+            return user.openai_model
+        return self.openai_model
+
+    def get_openai_extra_headers(self, user: Optional[User] = None) -> str:
+        """Return user's OpenAI extra headers if set, else fall back to global."""
+        if user and getattr(user, 'openai_extra_headers', None):
+            return user.openai_extra_headers
+        return self.openai_extra_headers
+
+    def get_openai_max_seed_artists(self, user: Optional[User] = None) -> int:
+        """Return user's OpenAI max seed artists if set, else fall back to global."""
+        if user and getattr(user, 'openai_max_seed_artists', None) is not None:
+            return user.openai_max_seed_artists
+        return self.openai_max_seed_artists
+
+    def get_openai_recommender_for_user(self, user: Optional[User] = None) -> Optional["OpenAIRecommender"]:
+        """
+        Get an OpenAI recommender configured for the user.
+        Uses user's API keys if set, otherwise falls back to global config.
+        Returns None if no API key is available.
+        """
+        api_key = (self.get_openai_api_key(user) or "").strip()
+        base_url = (self.get_openai_api_base(user) or "").strip()
+        env_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+
+        if not any([api_key, base_url, env_api_key]):
+            return None
+
+        # If user has no custom keys, use the global recommender
+        user_has_custom_keys = user and (
+            getattr(user, 'openai_api_key', None) or
+            getattr(user, 'openai_api_base', None)
+        )
+        if not user_has_custom_keys and self.openai_recommender:
+            return self.openai_recommender
+
+        # Create a recommender with user's (or global) settings
+        model = (self.get_openai_model(user) or "").strip() or None
+        max_seeds = self.get_openai_max_seed_artists(user)
+        try:
+            max_seeds_int = int(max_seeds)
+        except (TypeError, ValueError):
+            max_seeds_int = DEFAULT_MAX_SEED_ARTISTS
+        if max_seeds_int <= 0:
+            max_seeds_int = DEFAULT_MAX_SEED_ARTISTS
+
+        # Parse extra headers
+        headers_raw = self.get_openai_extra_headers(user)
+        headers_override = {}
+        if headers_raw:
+            try:
+                import json
+                parsed = json.loads(headers_raw)
+                if isinstance(parsed, dict):
+                    headers_override = {str(k).strip(): str(v) for k, v in parsed.items() if k and v is not None}
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        try:
+            return OpenAIRecommender(
+                api_key=api_key or None,
+                model=model,
+                base_url=base_url or None,
+                default_headers=headers_override or None,
+                max_seed_artists=max_seeds_int,
+            )
+        except Exception as exc:
+            self.logger.error("Failed to initialize user LLM client: %s", exc)
+            return None
+
     def emit_personal_sources_state(self, sid: str) -> None:
         session = self.get_session_if_exists(sid)
         if session is None:
@@ -328,7 +432,8 @@ class DataHandler:
 
         user = self._resolve_user(session.user_id)
 
-        lastfm_service_ready = self.last_fm_user_service is not None
+        user_has_lastfm_keys = bool(user and getattr(user, 'lastfm_api_key', None) and getattr(user, 'lastfm_api_secret', None))
+        lastfm_service_ready = self.last_fm_user_service is not None or user_has_lastfm_keys
         lastfm_username = user.lastfm_username if user else None
         lastfm_enabled = bool(lastfm_service_ready and lastfm_username)
         if not lastfm_service_ready:
@@ -530,6 +635,7 @@ class DataHandler:
 
     def ai_prompt(self, sid: str, prompt: str) -> None:
         session = self.ensure_session(sid)
+        user = self._resolve_user(session.user_id)
         prompt_text = (prompt or "").strip()
         if not prompt_text:
             self.socketio.emit(
@@ -541,11 +647,13 @@ class DataHandler:
             )
             return
 
-        if not self.openai_recommender:
+        # Get recommender with user's API keys (or fallback to global)
+        recommender = self.get_openai_recommender_for_user(user)
+        if not recommender:
             self.socketio.emit(
                 "ai_prompt_error",
                 {
-                    "message": "AI assistant isn't configured yet. Add an LLM API key or base URL in settings.",
+                    "message": "AI assistant isn't configured yet. Add an LLM API key in settings or your profile.",
                 },
                 room=sid,
             )
@@ -556,8 +664,8 @@ class DataHandler:
             cleaned_library_names = set(self.cached_cleaned_lidarr_names)
 
         prompt_preview = prompt_text if len(prompt_text) <= 120 else f"{prompt_text[:117]}..."
-        model_name = getattr(self.openai_recommender, "model", "unknown")
-        timeout_value = getattr(self.openai_recommender, "timeout", None)
+        model_name = getattr(recommender, "model", "unknown")
+        timeout_value = getattr(recommender, "timeout", None)
         self.logger.info(
             "AI prompt started (model=%s, timeout=%s, library_size=%d, prompt=\"%s\")",
             model_name,
@@ -568,7 +676,7 @@ class DataHandler:
 
         start_time = time.perf_counter()
         try:
-            seeds = self.openai_recommender.generate_seed_artists(prompt_text, library_artists)
+            seeds = recommender.generate_seed_artists(prompt_text, library_artists)
         except Exception as exc:  # pragma: no cover - network errors
             elapsed = time.perf_counter() - start_time
             self.logger.error("AI prompt failed after %.2fs: %s", elapsed, exc)
@@ -660,12 +768,15 @@ class DataHandler:
         if not success:
             return
 
-    def _fetch_lastfm_personal_artists(self, username: str) -> List[str]:
-        if not self.last_fm_user_service:
+    def _fetch_lastfm_personal_artists(self, username: str, user=None) -> List[str]:
+        service = self.last_fm_user_service
+        if service is None and user and getattr(user, 'lastfm_api_key', None) and getattr(user, 'lastfm_api_secret', None):
+            service = LastFmUserService(user.lastfm_api_key, user.lastfm_api_secret)
+        if not service:
             return []
-        recommendations = self.last_fm_user_service.get_recommended_artists(username, limit=50)
+        recommendations = service.get_recommended_artists(username, limit=50)
         if not recommendations:
-            recommendations = self.last_fm_user_service.get_top_artists(username, limit=50)
+            recommendations = service.get_top_artists(username, limit=50)
         return [artist.name for artist in recommendations if getattr(artist, "name", None)]
 
     def _fetch_listenbrainz_personal_artists(self, username: str) -> List[str]:
@@ -675,23 +786,23 @@ class DataHandler:
         names = playlist_artists.artists if playlist_artists else []
         return [name for name in names if name]
 
-    def personal_recommendations(self, sid: str, source: str) -> None:
-        session = self.ensure_session(sid)
-        source_key = (source or "").strip().lower() or "lastfm"
-
-        source_definitions = {
+    def _personal_source_definitions(self, user=None) -> Dict[str, Dict[str, Any]]:
+        """Return source-specific metadata and loaders for personal recommendations."""
+        user_has_lastfm = bool(user and getattr(user, 'lastfm_api_key', None) and getattr(user, 'lastfm_api_secret', None))
+        lastfm_service_ready = bool(self.last_fm_user_service) or user_has_lastfm
+        return {
             "lastfm": {
                 "label": "Last.fm",
                 "title": "Last.fm discovery",
                 "username_attr": "lastfm_username",
-                "service_ready": bool(self.last_fm_user_service),
+                "service_ready": lastfm_service_ready,
                 "service_missing_reason": (
                     "Administrator must configure a Last.fm API key and secret in Settings before this feature can be used."
                 ),
                 "missing_username_reason": (
                     "Add your Last.fm username under Profile → Listening services to use this feature."
                 ),
-                "fetch": self._fetch_lastfm_personal_artists,
+                "fetch": lambda username: self._fetch_lastfm_personal_artists(username, user),
                 "error_message": "We couldn't reach Last.fm right now. Please try again shortly.",
             },
             "listenbrainz": {
@@ -708,7 +819,89 @@ class DataHandler:
             },
         }
 
-        config = source_definitions.get(source_key)
+    def _fetch_personal_recommendation_seeds(
+        self,
+        sid: str,
+        source_key: str,
+        config: Dict[str, Any],
+        username: str,
+    ) -> Optional[List[str]]:
+        """Fetch raw personal recommendation seeds for the selected integration source."""
+        source_label = config["label"]
+        try:
+            return config["fetch"](username)
+        except ListenBrainzIntegrationError as exc:  # pragma: no cover - network errors
+            self.logger.error("Failed to load ListenBrainz picks for %s: %s", username, exc)
+        except Exception as exc:  # pragma: no cover - network errors
+            self.logger.error("Failed to load %s recommendations for %s: %s", source_label, username, exc)
+        self._emit_personal_error(
+            sid,
+            source_key,
+            config["error_message"],
+            title=config["title"],
+        )
+        return None
+
+    def _ensure_cleaned_library_names(self, session: SessionState, sid: str) -> set[str]:
+        """Ensure per-session normalized Lidarr names are available for seed filtering."""
+        if not session.cleaned_lidarr_items:
+            cleaned = self._copy_cached_cleaned_names()
+            if not cleaned:
+                try:
+                    self.get_artists_from_lidarr(sid)
+                    cleaned = self._copy_cached_cleaned_names()
+                except Exception:  # pragma: no cover - network errors
+                    cleaned = []
+            session.cleaned_lidarr_items = cleaned
+        return set(session.cleaned_lidarr_items)
+
+    def _emit_sidebar_success(self, sid: str, session: SessionState) -> None:
+        """Broadcast the latest sidebar payload after recommendation processing."""
+        self.socketio.emit(
+            "lidarr_sidebar_update",
+            {
+                "Status": "Success",
+                "Data": session.lidarr_items,
+                "Running": session.running,
+            },
+            room=sid,
+        )
+
+    def _emit_all_personal_recommendations_known(
+        self,
+        session: SessionState,
+        sid: str,
+        source_key: str,
+        username_display: str,
+        skipped_existing: Sequence[str],
+        title: str,
+    ) -> None:
+        """Emit feedback when every personal recommendation already exists in Lidarr."""
+        self.socketio.emit(
+            "user_recs_ack",
+            {
+                "source": source_key,
+                "username": username_display,
+                "seeds": [],
+                "skipped": list(skipped_existing),
+            },
+            room=sid,
+        )
+        self._emit_personal_error(
+            sid,
+            source_key,
+            "All recommended artists are already in your Lidarr library.",
+            title=title,
+        )
+        session.mark_stopped()
+        self._emit_sidebar_success(sid, session)
+
+    def personal_recommendations(self, sid: str, source: str) -> None:
+        session = self.ensure_session(sid)
+        source_key = (source or "").strip().lower() or "lastfm"
+        user = self._resolve_user(session.user_id)
+
+        config = self._personal_source_definitions(user=user).get(source_key)
         if not config:
             self._emit_personal_error(
                 sid,
@@ -718,7 +911,6 @@ class DataHandler:
             )
             return
 
-        user = self._resolve_user(session.user_id)
         if not user:
             self._emit_personal_error(
                 sid,
@@ -1321,12 +1513,14 @@ class DataHandler:
     # Preview ---------------------------------------------------------
     def preview(self, sid: str, raw_artist_name: str) -> None:
         artist_name = urllib.parse.unquote(raw_artist_name)
+        session = self.ensure_session(sid)
+        user = self._resolve_user(session.user_id)
         try:
             preview_info: dict | str
             biography = None
             lfm = pylast.LastFMNetwork(
-                api_key=self.last_fm_api_key,
-                api_secret=self.last_fm_api_secret,
+                api_key=self.get_lastfm_api_key(user),
+                api_secret=self.get_lastfm_api_secret(user),
             )
             search_results = lfm.search_for_artist(artist_name)
             artists = search_results.get_next_page()
@@ -1357,96 +1551,118 @@ class DataHandler:
 
         self.socketio.emit("lastfm_preview", preview_info, room=sid)
 
-    def prehear(self, sid: str, raw_artist_name: str) -> None:
-        artist_name = urllib.parse.unquote(raw_artist_name)
+    def _fetch_lastfm_top_tracks(self, artist_name: str, user=None) -> List[Any]:
+        """Fetch top Last.fm tracks for an artist, returning an empty list on network errors."""
         lfm = pylast.LastFMNetwork(
-            api_key=self.last_fm_api_key,
-            api_secret=self.last_fm_api_secret,
+            api_key=self.get_lastfm_api_key(user),
+            api_secret=self.get_lastfm_api_secret(user),
         )
-        yt_key = (self.youtube_api_key or "").strip()
-        result: dict[str, str] = {"error": "No sample found"}
-        top_tracks = []
         try:
             artist = lfm.get_artist(artist_name)
-            top_tracks = artist.get_top_tracks(limit=10)
+            return artist.get_top_tracks(limit=10)
         except Exception as exc:  # pragma: no cover - network errors
-            self.logger.error(f"LastFM error: {exc}")
+            self.logger.error("LastFM error: %s", exc)
+            return []
 
-        def attempt_youtube(track_name: str) -> Optional[dict[str, str]]:
-            if not yt_key:
-                return None
-            query = f"{artist_name} {track_name}"
-            yt_url = (
-                "https://www.googleapis.com/youtube/v3/search?part=snippet"
-                f"&q={requests.utils.quote(query)}&key={yt_key}&type=video&maxResults=1"
-            )
-            try:
-                yt_resp = requests.get(yt_url, timeout=10)
-                yt_resp.raise_for_status()
-            except Exception as exc:  # pragma: no cover - network errors
-                self.logger.error(f"YouTube search failed: {exc}")
-                return None
-            yt_items = yt_resp.json().get("items", [])
-            if not yt_items:
-                return None
-            video_id = yt_items[0]["id"]["videoId"]
-            return {
-                "videoId": video_id,
-                "track": track_name,
-                "artist": artist_name,
-                "source": "youtube",
-            }
-
-        def attempt_itunes(track_name: Optional[str]) -> Optional[dict[str, str]]:
-            search_term = f"{artist_name} {track_name}" if track_name else artist_name
-            params = {
-                "term": search_term,
-                "entity": "musicTrack",
-                "limit": 5,
-                "media": "music",
-            }
-            try:
-                resp = requests.get("https://itunes.apple.com/search", params=params, timeout=10)
-                resp.raise_for_status()
-            except Exception as exc:  # pragma: no cover - network errors
-                self.logger.error(f"iTunes lookup failed: {exc}")
-                return None
-            for entry in resp.json().get("results", []):
-                preview_url = entry.get("previewUrl")
-                if not preview_url:
-                    continue
-                return {
-                    "previewUrl": preview_url,
-                    "track": entry.get("trackName") or (track_name or artist_name),
-                    "artist": entry.get("artistName") or artist_name,
-                    "source": "itunes",
-                }
+    def _attempt_youtube_preview(
+        self,
+        artist_name: str,
+        track_name: str,
+        yt_key: str,
+    ) -> Optional[Dict[str, str]]:
+        """Attempt to resolve a YouTube video preview for an artist-track pair."""
+        if not yt_key:
             return None
-
+        query = f"{artist_name} {track_name}"
+        yt_url = (
+            "https://www.googleapis.com/youtube/v3/search?part=snippet"
+            f"&q={requests.utils.quote(query)}&key={yt_key}&type=video&maxResults=1"
+        )
         try:
-            if yt_key:
-                for track in top_tracks:
-                    track_name = track.item.title
-                    candidate = attempt_youtube(track_name)
-                    if candidate:
-                        result = candidate
-                        break
-                    time.sleep(0.2)
-
-            if isinstance(result, dict) and not result.get("previewUrl") and not result.get("videoId"):
-                for track in top_tracks:
-                    track_name = track.item.title
-                    candidate = attempt_itunes(track_name)
-                    if candidate:
-                        result = candidate
-                        break
-
-            if isinstance(result, dict) and not result.get("previewUrl") and not result.get("videoId"):
-                fallback_candidate = attempt_itunes(None)
-                if fallback_candidate:
-                    result = fallback_candidate
+            yt_resp = requests.get(yt_url, timeout=10)
+            yt_resp.raise_for_status()
         except Exception as exc:  # pragma: no cover - network errors
-            self.logger.error(f"Prehear error: {exc}")
+            self.logger.error("YouTube search failed: %s", exc)
+            return None
+        yt_items = yt_resp.json().get("items", [])
+        if not yt_items:
+            return None
+        video_id = yt_items[0]["id"]["videoId"]
+        return {
+            "videoId": video_id,
+            "track": track_name,
+            "artist": artist_name,
+            "source": "youtube",
+        }
+
+    def _attempt_itunes_preview(
+        self,
+        artist_name: str,
+        track_name: Optional[str],
+    ) -> Optional[Dict[str, str]]:
+        """Attempt to resolve an iTunes audio preview for an artist-track pair."""
+        search_term = f"{artist_name} {track_name}" if track_name else artist_name
+        params = {
+            "term": search_term,
+            "entity": "musicTrack",
+            "limit": 5,
+            "media": "music",
+        }
+        try:
+            response = requests.get("https://itunes.apple.com/search", params=params, timeout=10)
+            response.raise_for_status()
+        except Exception as exc:  # pragma: no cover - network errors
+            self.logger.error("iTunes lookup failed: %s", exc)
+            return None
+        for entry in response.json().get("results", []):
+            preview_url = entry.get("previewUrl")
+            if not preview_url:
+                continue
+            return {
+                "previewUrl": preview_url,
+                "track": entry.get("trackName") or (track_name or artist_name),
+                "artist": entry.get("artistName") or artist_name,
+                "source": "itunes",
+            }
+        return None
+
+    def _resolve_audio_preview(
+        self,
+        artist_name: str,
+        top_tracks: Sequence[Any],
+        yt_key: str,
+    ) -> Dict[str, str]:
+        """Resolve the best available preview source using YouTube, then iTunes fallbacks."""
+        result: Dict[str, str] = {"error": "No sample found"}
+        if yt_key:
+            for track in top_tracks:
+                track_name = track.item.title
+                candidate = self._attempt_youtube_preview(artist_name, track_name, yt_key)
+                if candidate:
+                    return candidate
+                time.sleep(0.2)
+
+        for track in top_tracks:
+            track_name = track.item.title
+            candidate = self._attempt_itunes_preview(artist_name, track_name)
+            if candidate:
+                return candidate
+
+        fallback_candidate = self._attempt_itunes_preview(artist_name, None)
+        if fallback_candidate:
+            return fallback_candidate
+        return result
+
+    def prehear(self, sid: str, raw_artist_name: str) -> None:
+        artist_name = urllib.parse.unquote(raw_artist_name)
+        session = self.ensure_session(sid)
+        user = self._resolve_user(session.user_id)
+        yt_key = (self.get_youtube_api_key(user) or "").strip()
+        top_tracks = self._fetch_lastfm_top_tracks(artist_name, user)
+        try:
+            result = self._resolve_audio_preview(artist_name, top_tracks, yt_key)
+        except Exception as exc:  # pragma: no cover - network errors
+            self.logger.error("Prehear error: %s", exc)
             result = {"error": str(exc)}
 
         self.socketio.emit("prehear_result", result, room=sid)
