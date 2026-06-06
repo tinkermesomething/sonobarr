@@ -38,7 +38,7 @@ def settings():
 
     valid_tabs = ["profile"]
     if current_user.is_admin:
-        valid_tabs.extend(["users", "requests", "lidarr", "system"])
+        valid_tabs.extend(["users", "requests", "lidarr", "apikeys", "system"])
 
     if active_tab not in valid_tabs:
         active_tab = "profile"
@@ -63,6 +63,10 @@ def settings():
         if edit_server_id:
             edit_server = LidarrServer.query.get(edit_server_id)
 
+    apikeys_config = None
+    if active_tab == "apikeys" and current_user.is_admin:
+        apikeys_config = _get_apikeys_config()
+
     system_config = None
     if active_tab == "system" and current_user.is_admin:
         system_config = _get_system_config()
@@ -75,6 +79,7 @@ def settings():
         artist_requests=artist_requests,
         lidarr_servers=lidarr_servers,
         edit_server=edit_server,
+        apikeys_config=apikeys_config,
         system_config=system_config,
     )
 
@@ -133,6 +138,9 @@ def update_settings():
             _delete_lidarr_server(request.form)
         elif action == "toggle_active":
             _toggle_lidarr_server_active(request.form)
+
+    elif tab == "apikeys" and current_user.is_admin:
+        _save_apikeys_config(request.form)
 
     elif tab == "system" and current_user.is_admin:
         _save_system_config(request.form)
@@ -450,19 +458,6 @@ def _get_system_config():
         return {}
 
     return {
-        "lidarr_address": data_handler.lidarr_address,
-        "lidarr_api_key": data_handler.lidarr_api_key,
-        "root_folder_path": data_handler.root_folder_path,
-        "quality_profile_id": data_handler.quality_profile_id,
-        "metadata_profile_id": data_handler.metadata_profile_id,
-        "lidarr_api_timeout": data_handler.lidarr_api_timeout,
-        "fallback_to_top_result": data_handler.fallback_to_top_result,
-        "search_for_missing_albums": data_handler.search_for_missing_albums,
-        "dry_run_adding_to_lidarr": data_handler.dry_run_adding_to_lidarr,
-        "lidarr_monitor_option": data_handler.lidarr_monitor_option,
-        "lidarr_monitor_new_items": data_handler.lidarr_monitor_new_items,
-        "lidarr_monitored": data_handler.lidarr_monitored,
-        "lidarr_albums_to_monitor": data_handler.lidarr_albums_to_monitor,
         "similar_artist_batch_size": data_handler.similar_artist_batch_size,
         "auto_start": data_handler.auto_start,
         "auto_start_delay": data_handler.auto_start_delay,
@@ -471,40 +466,52 @@ def _get_system_config():
 
 
 def _save_system_config(form_data):
-    """Save system configuration from form data."""
     data_handler = current_app.extensions.get("data_handler")
     if not data_handler:
         flash("Configuration handler not available.", "danger")
         return
-
     try:
-        # Build the payload dict from form data
-        payload = {
-            "lidarr_address": (form_data.get("lidarr_address") or "").strip(),
-            "lidarr_api_key": (form_data.get("lidarr_api_key") or "").strip(),
-            "root_folder_path": (form_data.get("root_folder_path") or "").strip(),
-            "quality_profile_id": form_data.get("quality_profile_id", ""),
-            "metadata_profile_id": form_data.get("metadata_profile_id", ""),
-            "lidarr_api_timeout": form_data.get("lidarr_api_timeout", ""),
-            "fallback_to_top_result": form_data.get("fallback_to_top_result") == "on",
-            "search_for_missing_albums": form_data.get("search_for_missing_albums") == "on",
-            "dry_run_adding_to_lidarr": form_data.get("dry_run_adding_to_lidarr") == "on",
-            "lidarr_monitor_option": (form_data.get("lidarr_monitor_option") or "").strip(),
-            "lidarr_monitor_new_items": (form_data.get("lidarr_monitor_new_items") or "").strip(),
-            "lidarr_monitored": form_data.get("lidarr_monitored") == "on",
-            "lidarr_albums_to_monitor": (form_data.get("lidarr_albums_to_monitor") or "").strip(),
+        data_handler.update_settings({
             "similar_artist_batch_size": form_data.get("similar_artist_batch_size", ""),
             "auto_start": form_data.get("auto_start") == "on",
             "auto_start_delay": form_data.get("auto_start_delay", ""),
             "api_key": (form_data.get("api_key") or "").strip(),
-        }
-
-        data_handler.update_settings(payload)
-        flash("Configuration saved successfully.", "success")
-
+        })
+        flash("Configuration saved.", "success")
     except Exception as exc:
         current_app.logger.exception("Failed to save system configuration: %s", exc)
-        flash("Failed to save configuration. Check the server logs for details.", "danger")
+        flash("Failed to save configuration.", "danger")
+
+
+def _get_apikeys_config() -> dict:
+    from ..services import app_settings as appsettings
+    return {
+        "last_fm_api_key": appsettings.get("last_fm_api_key") or "",
+        "last_fm_api_secret": appsettings.get("last_fm_api_secret") or "",
+        "youtube_api_key": appsettings.get("youtube_api_key") or "",
+        "openai_api_key": appsettings.get("openai_api_key") or "",
+        "openai_api_base": appsettings.get("openai_api_base") or "",
+        "openai_model": appsettings.get("openai_model") or "",
+        "openai_extra_headers": appsettings.get("openai_extra_headers") or "",
+        "openai_max_seed_artists": appsettings.get_int("openai_max_seed_artists", 5),
+    }
+
+
+def _save_apikeys_config(form_data) -> None:
+    from ..services import app_settings as appsettings
+    appsettings.set_many({
+        "last_fm_api_key": (form_data.get("last_fm_api_key") or "").strip(),
+        "last_fm_api_secret": (form_data.get("last_fm_api_secret") or "").strip(),
+        "youtube_api_key": (form_data.get("youtube_api_key") or "").strip(),
+        "openai_api_key": (form_data.get("openai_api_key") or "").strip(),
+        "openai_api_base": (form_data.get("openai_api_base") or "").strip(),
+        "openai_model": (form_data.get("openai_model") or "").strip(),
+        "openai_extra_headers": (form_data.get("openai_extra_headers") or "").strip(),
+        "openai_max_seed_artists": (form_data.get("openai_max_seed_artists") or "5").strip(),
+    })
+    db.session.commit()
+    _reload_data_handler()
+    flash("Global API keys saved.", "success")
 
 
 # ── Lidarr server CRUD helpers ────────────────────────────────────────────────

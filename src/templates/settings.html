@@ -36,6 +36,11 @@
               <i class="fa-solid fa-server"></i>
               <span>Lidarr Servers</span>
             </a>
+            <a class="nav-link {% if active_tab == 'apikeys' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
+               href="{{ url_for('main.settings', tab='apikeys') }}">
+              <i class="fa-solid fa-key"></i>
+              <span>API Keys</span>
+            </a>
             <a class="nav-link {% if active_tab == 'system' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
                href="{{ url_for('main.settings', tab='system') }}">
               <i class="fa-solid fa-gear"></i>
@@ -618,6 +623,96 @@
           }
           </script>
 
+          {% elif active_tab == 'apikeys' %}
+          <!-- Global API Keys -->
+          <h2 class="h4 mb-3">Global API Keys</h2>
+          <p class="text-muted mb-4">Default API keys used when users haven't set their own in Profile. Users can always override these with personal keys.</p>
+          <form method="post" action="{{ url_for('main.update_settings') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="tab" value="apikeys">
+
+            <div class="card mb-4">
+              <div class="card-body">
+                <h3 class="h5 mb-3">Last.fm</h3>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">API Key</label>
+                    <input type="text" class="form-control" name="last_fm_api_key"
+                           value="{{ apikeys_config.last_fm_api_key if apikeys_config else '' }}"
+                           placeholder="Last.fm API key">
+                    <div class="form-text">Required for similar artist discovery and genre tags.</div>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">API Secret</label>
+                    <input type="text" class="form-control" name="last_fm_api_secret"
+                           value="{{ apikeys_config.last_fm_api_secret if apikeys_config else '' }}"
+                           placeholder="Last.fm API secret">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card mb-4">
+              <div class="card-body">
+                <h3 class="h5 mb-3">YouTube</h3>
+                <div class="mb-0">
+                  <label class="form-label">API Key</label>
+                  <input type="text" class="form-control" name="youtube_api_key"
+                         value="{{ apikeys_config.youtube_api_key if apikeys_config else '' }}"
+                         placeholder="YouTube Data API v3 key">
+                  <div class="form-text">Powers the preview player. Falls back to iTunes samples if not set.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card mb-4">
+              <div class="card-body">
+                <h3 class="h5 mb-3">LLM (AI Assistant)</h3>
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label">API Key</label>
+                    <input type="text" class="form-control" name="openai_api_key"
+                           value="{{ apikeys_config.openai_api_key if apikeys_config else '' }}"
+                           placeholder="sk-... or provider key">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Base URL</label>
+                    <input type="url" class="form-control" name="openai_api_base"
+                           value="{{ apikeys_config.openai_api_base if apikeys_config else '' }}"
+                           placeholder="https://api.openai.com/v1">
+                    <div class="form-text">Leave blank for OpenAI default. Set for LiteLLM, Ollama, etc.</div>
+                  </div>
+                </div>
+                <div class="row g-3 mb-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Model</label>
+                    <input type="text" class="form-control" name="openai_model"
+                           value="{{ apikeys_config.openai_model if apikeys_config else '' }}"
+                           placeholder="gpt-4o-mini">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Max Seed Artists</label>
+                    <input type="number" class="form-control" name="openai_max_seed_artists" min="1"
+                           value="{{ apikeys_config.openai_max_seed_artists if apikeys_config else '5' }}">
+                    <div class="form-text">Top library artists sent to the LLM for context.</div>
+                  </div>
+                </div>
+                <div class="mb-0">
+                  <label class="form-label">Extra Headers (JSON)</label>
+                  <textarea class="form-control" name="openai_extra_headers" rows="2"
+                            placeholder='{"Authorization": "Bearer ..."}'
+                  >{{ apikeys_config.openai_extra_headers if apikeys_config else '' }}</textarea>
+                  <div class="form-text">Optional. For custom auth or provider routing.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+              <a href="{{ url_for('main.settings', tab='apikeys') }}" class="btn btn-outline-secondary">Cancel</a>
+              <button type="submit" class="btn btn-primary">Save API Keys</button>
+            </div>
+          </form>
+
           {% elif active_tab == 'system' %}
           <!-- System Configuration -->
           <h2 class="h4 mb-4">System Configuration</h2>
@@ -625,97 +720,6 @@
           <form method="post" action="{{ url_for('main.update_settings') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="tab" value="system">
-
-            <!-- Lidarr Connection -->
-            <div class="card mb-4">
-              <div class="card-body">
-                <h3 class="h5 mb-3">Lidarr Connection</h3>
-
-                <div class="mb-3">
-                  <label for="lidarr-address" class="form-label">Lidarr Address</label>
-                  <input type="text" class="form-control" id="lidarr-address" name="lidarr_address" placeholder="http://192.168.1.1:8686" value="{{ system_config.lidarr_address if system_config else '' }}">
-                </div>
-
-                <div class="mb-3">
-                  <label for="lidarr-api-key" class="form-label">Lidarr API Key</label>
-                  <input type="text" class="form-control" id="lidarr-api-key" name="lidarr_api_key" placeholder="Enter Lidarr API Key" value="{{ system_config.lidarr_api_key if system_config else '' }}">
-                </div>
-
-                <div class="mb-3">
-                  <label for="root-folder-path" class="form-label">Root Folder Path</label>
-                  <input type="text" class="form-control" id="root-folder-path" name="root_folder_path" placeholder="/data/media/music/" value="{{ system_config.root_folder_path if system_config else '' }}">
-                </div>
-
-                <div class="row g-3 mb-3">
-                  <div class="col-md-6">
-                    <label for="quality-profile-id" class="form-label">Quality Profile ID</label>
-                    <input type="number" class="form-control" id="quality-profile-id" name="quality_profile_id" min="1" value="{{ system_config.quality_profile_id if system_config else '' }}">
-                  </div>
-                  <div class="col-md-6">
-                    <label for="metadata-profile-id" class="form-label">Metadata Profile ID</label>
-                    <input type="number" class="form-control" id="metadata-profile-id" name="metadata_profile_id" min="1" value="{{ system_config.metadata_profile_id if system_config else '' }}">
-                  </div>
-                </div>
-
-                <div class="mb-3">
-                  <label for="lidarr-api-timeout" class="form-label">Lidarr API Timeout (seconds)</label>
-                  <input type="number" class="form-control" id="lidarr-api-timeout" name="lidarr_api_timeout" min="1" step="1" value="{{ system_config.lidarr_api_timeout if system_config else '' }}">
-                  <small class="form-text text-muted">How long Sonobarr waits for Lidarr before giving up.</small>
-                </div>
-
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="fallback-to-top-result" name="fallback_to_top_result" {% if system_config and system_config.fallback_to_top_result %}checked{% endif %}>
-                  <label class="form-check-label" for="fallback-to-top-result">Fallback to Lidarr's top search result when similarity is low</label>
-                </div>
-
-                <div class="form-check form-switch mb-2">
-                  <input class="form-check-input" type="checkbox" id="search-for-missing-albums" name="search_for_missing_albums" {% if system_config and system_config.search_for_missing_albums %}checked{% endif %}>
-                  <label class="form-check-label" for="search-for-missing-albums">Trigger Lidarr's "search for missing" flag on add</label>
-                </div>
-
-                <div class="form-check form-switch mb-3">
-                  <input class="form-check-input" type="checkbox" id="dry-run-adding-to-lidarr" name="dry_run_adding_to_lidarr" {% if system_config and system_config.dry_run_adding_to_lidarr %}checked{% endif %}>
-                  <label class="form-check-label" for="dry-run-adding-to-lidarr">Dry run additions (don't call Lidarr)</label>
-                </div>
-
-                <div class="row g-3 mb-3">
-                  <div class="col-md-6">
-                    <label for="lidarr-monitor-option" class="form-label">Monitor Strategy</label>
-                    <select class="form-select" id="lidarr-monitor-option" name="lidarr_monitor_option">
-                      <option value="" {% if not system_config or not system_config.lidarr_monitor_option %}selected{% endif %}>Use Lidarr default</option>
-                      <option value="all" {% if system_config and system_config.lidarr_monitor_option == 'all' %}selected{% endif %}>All</option>
-                      <option value="future" {% if system_config and system_config.lidarr_monitor_option == 'future' %}selected{% endif %}>Future</option>
-                      <option value="missing" {% if system_config and system_config.lidarr_monitor_option == 'missing' %}selected{% endif %}>Missing</option>
-                      <option value="existing" {% if system_config and system_config.lidarr_monitor_option == 'existing' %}selected{% endif %}>Existing</option>
-                      <option value="latest" {% if system_config and system_config.lidarr_monitor_option == 'latest' %}selected{% endif %}>Latest</option>
-                      <option value="first" {% if system_config and system_config.lidarr_monitor_option == 'first' %}selected{% endif %}>First</option>
-                      <option value="none" {% if system_config and system_config.lidarr_monitor_option == 'none' %}selected{% endif %}>None</option>
-                      <option value="unknown" {% if system_config and system_config.lidarr_monitor_option == 'unknown' %}selected{% endif %}>Unknown</option>
-                    </select>
-                  </div>
-                  <div class="col-md-6">
-                    <label for="lidarr-monitor-new-items" class="form-label">Monitor New Items</label>
-                    <select class="form-select" id="lidarr-monitor-new-items" name="lidarr_monitor_new_items">
-                      <option value="" {% if not system_config or not system_config.lidarr_monitor_new_items %}selected{% endif %}>Use Lidarr default</option>
-                      <option value="all" {% if system_config and system_config.lidarr_monitor_new_items == 'all' %}selected{% endif %}>All</option>
-                      <option value="new" {% if system_config and system_config.lidarr_monitor_new_items == 'new' %}selected{% endif %}>New</option>
-                      <option value="none" {% if system_config and system_config.lidarr_monitor_new_items == 'none' %}selected{% endif %}>None</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div class="form-check form-switch mb-3">
-                  <input class="form-check-input" type="checkbox" id="lidarr-monitored" name="lidarr_monitored" {% if system_config and system_config.lidarr_monitored %}checked{% endif %}>
-                  <label class="form-check-label" for="lidarr-monitored">Mark newly added artists as monitored</label>
-                </div>
-
-                <div class="mb-0">
-                  <label for="lidarr-albums-to-monitor" class="form-label">Albums to Monitor (optional)</label>
-                  <textarea class="form-control" id="lidarr-albums-to-monitor" name="lidarr_albums_to_monitor" rows="2" placeholder="One album ID per line">{{ system_config.lidarr_albums_to_monitor if system_config else '' }}</textarea>
-                  <small class="form-text text-muted">Leave blank to let Lidarr decide which albums to monitor.</small>
-                </div>
-              </div>
-            </div>
 
             <!-- Discovery Behaviour -->
             <div class="card mb-4">
@@ -745,10 +749,6 @@
             <div class="card mb-4">
               <div class="card-body">
                 <h3 class="h5 mb-3">System Settings</h3>
-                <p class="text-muted small mb-3">
-                  <strong>Note:</strong> External API keys (Last.fm, YouTube, LLM) are now configured per-user in Profile settings.
-                </p>
-
                 <div class="mb-0">
                   <label for="api-key" class="form-label">System API Key</label>
                   <input type="text" class="form-control" id="api-key" name="api_key" placeholder="Enter API Key for external integrations" value="{{ system_config.api_key if system_config else '' }}">
