@@ -17,9 +17,17 @@ def run(app, logger: logging.Logger) -> None:
     from ..extensions import db
     from . import app_settings as appsettings
     from ..config import get_env_value
+    from sqlalchemy.exc import OperationalError
+
+    # Guard: tables may not exist yet if called during flask db upgrade import
+    try:
+        server_count = LidarrServer.query.count()
+    except OperationalError:
+        logger.debug("Startup migration: tables not ready yet (pre-migration context), skipping.")
+        return
 
     # Already migrated if any servers exist
-    if LidarrServer.query.count() > 0:
+    if server_count > 0:
         _migrate_oidc_env(logger)
         return
 

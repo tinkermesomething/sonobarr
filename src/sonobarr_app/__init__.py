@@ -91,11 +91,6 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     _init_core_extensions(app)
     _register_user_loader()
 
-    # Run startup migration (JSON → DB) before DataHandler loads settings from DB
-    with app.app_context():
-        from .services import startup_migration
-        startup_migration.run(app, app.logger)
-
     data_handler = _initialize_services(app)
 
     # Blueprints ------------------------------------------------------
@@ -271,6 +266,9 @@ def _run_database_initialisation(app: Flask, data_handler: DataHandler) -> None:
     with app.app_context():
         db.create_all()
         _ensure_user_profile_columns(app.logger)
+        # Startup migration must run after db.create_all() so tables exist
+        from .services import startup_migration
+        startup_migration.run(app, app.logger)
         bootstrap_first_admin(app.logger)
         data_handler.reload_settings_from_db()
 
