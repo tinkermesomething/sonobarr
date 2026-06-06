@@ -2,11 +2,13 @@
 
 > Music discovery for Lidarr power users, blending Last.fm insights, ListenBrainz playlists, and a modern web UI.
 
-[![Release](https://img.shields.io/github/v/release/Dodelidoo-Labs/sonobarr?label=Latest%20release&cacheSeconds=60)](https://github.com/Dodelidoo-Labs/sonobarr/releases)
-[![Container](https://img.shields.io/badge/GHCR-sonobarr-blue?logo=github)](https://github.com/Dodelidoo-Labs/sonobarr/pkgs/container/sonobarr)
-[![License](https://img.shields.io/github/license/Dodelidoo-Labs/sonobarr)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/tinkermesomething/sonobarr?label=Latest%20release&cacheSeconds=60)](https://github.com/tinkermesomething/sonobarr/releases)
+[![Container](https://img.shields.io/badge/GHCR-sonobarr-blue?logo=github)](https://github.com/tinkermesomething/sonobarr/pkgs/container/sonobarr)
+[![License](https://img.shields.io/github/license/tinkermesomething/sonobarr)](./LICENSE)
 
-Sonobarr marries your existing Lidarr library with Last.fm’s discovery graph to surface artists you'll actually like. It runs as a Flask + Socket.IO application, ships with a polished Bootstrap UI, and includes admin tooling so folks can share a single instance safely.
+> **This is an independently maintained fork** of [Dodelidoo-Labs/sonobarr](https://github.com/Dodelidoo-Labs/sonobarr) (forked at v0.12.1). The upstream project has been inactive since March 2026. This fork continues active development with new features including OIDC SSO, per-user API keys, a setup wizard, and DB-backed configuration. The Docker image is published to `ghcr.io/tinkermesomething/sonobarr`.
+
+Sonobarr marries your existing Lidarr library with Last.fm’s discovery graph to surface artists you’ll actually like. It runs as a Flask + Socket.IO application, ships with a polished Bootstrap UI, and includes admin tooling so folks can share a single instance safely.
 
 <p align="center">
   <img src="https://inubes.app/apps/files_sharing/publicpreview/5j6WJYrCGcBijdo?file=/&fileId=27122&x=3840&y=2160&a=true&etag=e598390299bd52d0b98cf85a4d7aacee" alt="Sonobarr logo">
@@ -40,7 +42,8 @@ Sonobarr marries your existing Lidarr library with Last.fm’s discovery graph t
 - 👥 **Role-based access** – authentication, user management, profile controls for personal services, and admin-only settings live in one UI.
 - 🔐 **OIDC Single Sign-On** – enable OpenID Connect for authentication, with optional group-based admin assignment and "OIDC-only" mode.
 - 🔑 **Per-user API keys** – users can optionally bring their own Last.fm, YouTube, and LLM keys, with automatic fallback to admin-configured global keys.
-- 🛡️ **Hardened configuration** – atomic settings writes, locked-down file permissions, and CSRF-protected forms keep secrets safe.
+- 🛡️ **Hardened configuration** – all settings stored in SQLite (no config files to lose), and CSRF-protected forms keep secrets safe.
+- 🧙 **Setup wizard** – first-boot wizard guides the admin through Lidarr and API key setup; new users pick their server and personal keys on first login.
 - 🔔 **Update & schema self-healing** – footer badges surface new releases and the app backfills missing DB columns before loading users.
 - 🐳 **Docker-first deployment** – official GHCR image, rootless-friendly UID/GID mapping, and automatic migrations on start.
 - 🌐 Public API – REST API for integrating external tools such as custom dashboards (Documentation upcoming, for now study `/api/docs/` on your instance).
@@ -75,33 +78,44 @@ Sonobarr marries your existing Lidarr library with Last.fm’s discovery graph t
 
 ## Quick start (Docker)
 
-> 🐳 **Requirements**: Docker Engine ≥ 24, Docker Compose plugin, Last.fm API key, Lidarr API key.
+> 🐳 **Requirements**: Docker Engine ≥ 24, Docker Compose plugin.
 
-1. Create a working directory, cd into it, and make sure it’s owned by the UID/GID the container will use (defaults to `1000:1000`). This keeps every file the container writes accessible to you:
+1. Create a working directory and make sure it’s owned by UID/GID 1000 (the container default):
    ```bash
    mkdir -p sonobarr && cd sonobarr
    sudo chown -R 1000:1000 .
    ```
-2. Download the sample configuration:
-   ```bash
-   curl -L https://raw.githubusercontent.com/Dodelidoo-Labs/sonobarr/develop/docker-compose.yml -o docker-compose.yml
-   curl -L https://raw.githubusercontent.com/Dodelidoo-Labs/sonobarr/develop/.sample-env -o .env
+2. Create a minimal `docker-compose.yml`:
+   ```yaml
+   services:
+     sonobarr:
+       image: ghcr.io/tinkermesomething/sonobarr:latest
+       container_name: sonobarr
+       env_file:
+         - .env
+       volumes:
+         - ./config:/sonobarr/config
+         - /etc/localtime:/etc/localtime:ro
+       ports:
+         - "5000:5000"
+       restart: unless-stopped
    ```
-3. Open `.env` and populate **at least** these keys:
+3. Create `.env` with just the essentials:
    ```env
    secret_key=change-me-to-a-long-random-string
-   lidarr_address=http://your-lidarr:8686
-   lidarr_api_key=xxxxxxxxxxxxxxxxxxxxxxxx
-
-   # Note: External API keys (Last.fm, YouTube, LLM) are now configured per-user
-   # in Profile settings. The global keys below are deprecated.
    ```
-   > All keys in `.env` are lowercase by convention; the app will happily accept uppercase equivalents if you prefer exporting variables.
+   For OIDC SSO, also add:
+   ```env
+   OIDC_CLIENT_ID=your-client-id
+   OIDC_CLIENT_SECRET=your-client-secret
+   OIDC_SERVER_METADATA_URL=https://your-provider/.well-known/openid-configuration
+   ```
+   All other settings (Lidarr, API keys, discovery tuning) are configured through the setup wizard on first login.
 4. Start Sonobarr:
    ```bash
    docker compose up -d
    ```
-5. Browse to `http://localhost:5000` (or the host behind your reverse proxy) and sign in using the super-admin credentials defined in `.env`.
+5. Browse to `http://localhost:5000`. The **first user to log in becomes admin** and is guided through the setup wizard. No credentials in `.env` needed.
 
 ### Reverse proxy deployment
 
@@ -132,26 +146,18 @@ The footer indicator will show a green dot when you are on the newest release an
 
 ## Environment reference
 
-All variables can be supplied in lowercase (preferred for `.env`) or uppercase (useful for CI/CD systems). Defaults shown are the values Sonobarr falls back to when nothing is provided.
+Only a handful of variables belong in `.env`. Everything else is configured through the app UI and stored in the SQLite database.
 
-| Key | Default | Description |
+| Key | Required | Description |
 | --- | --- | --- |
-| `secret_key` (**required**) | – | Flask session signing key. Must be a long random string; store it in `.env` so sessions survive restarts. |
-| `lidarr_address` | `http://192.168.1.1:8686` | Base URL of your Lidarr instance. |
-| `lidarr_api_key` | – | Lidarr API key for artist lookups and additions. |
-| `root_folder_path` | `/data/media/music/` | Default root path used when adding new artists in Lidarr. |
-| `lidarr_api_timeout` | `120` | Seconds to wait for Lidarr before timing out requests. |
-| `quality_profile_id` | `1` | Numeric profile ID from Lidarr (see [issue #1](https://github.com/Dodelidoo-Labs/sonobarr/issues/1)). |
-| `metadata_profile_id` | `1` | Numeric metadata profile ID. |
-| `fallback_to_top_result` | `false` | When MusicBrainz finds no strong match, fall back to the first Lidarr search result. |
-| `search_for_missing_albums` | `false` | Toggle Lidarr's "search for missing" flag when adding an artist. |
-| `dry_run_adding_to_lidarr` | `false` | If `true`, Sonobarr will simulate additions without calling Lidarr. |
-| `last_fm_api_key` | – | **Deprecated**. Last.fm API key for similarity lookups. Now configured per-user in Profile settings. |
-| `last_fm_api_secret` | – | **Deprecated**. Last.fm API secret. Now configured per-user in Profile settings. |
-| `youtube_api_key` | – | **Deprecated**. Enables YouTube previews. Now configured per-user in Profile settings. |
-| `openai_api_key` | – | **Deprecated**. API key for OpenAI-compatible providers. Now configured per-user in Profile settings. |
-| `openai_model` | `gpt-4o-mini` | **Deprecated**. Model slug sent to the provider. Now configured per-user in Profile settings. |
-| `openai_api_base` | – | **Deprecated**. Custom base URL for LLM providers. Now configured per-user in Profile settings. |
+| `secret_key` | **Yes** | Flask session signing key. Must be a stable random string — changing it logs everyone out. |
+| `OIDC_CLIENT_ID` | OIDC only | OAuth 2.0 client ID from your identity provider. |
+| `OIDC_CLIENT_SECRET` | OIDC only | OAuth 2.0 client secret. |
+| `OIDC_SERVER_METADATA_URL` | OIDC only | Provider discovery URL (`/.well-known/openid-configuration`). |
+| `OIDC_ADMIN_GROUP` | No | Group claim that grants admin status. Seeded into DB on first boot; can be removed once configured via UI. |
+| `OIDC_ONLY` | No | Set `true` to disable local password login entirely. Seeded into DB on first boot. |
+
+All Lidarr configuration, API keys, discovery tuning, and user management are handled through the setup wizard and admin UI — not in `.env`.
 | `openai_extra_headers` | – | **Deprecated**. JSON object of additional headers for LLM calls. Now configured per-user in Profile settings. |
 | `openai_max_seed_artists` | `5` | **Deprecated**. Max seed artists from AI prompts. Now configured per-user in Profile settings. |
 | `similar_artist_batch_size` | `10` | Number of cards sent per batch while streaming results. |
@@ -236,7 +242,7 @@ Check the container logs - Sonobarr prints the Lidarr error payload. Common caus
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Dodelidoo-Labs/sonobarr/blob/main/CONTRIBUTING.md)
+See [CONTRIBUTING.md](https://github.com/tinkermesomething/sonobarr/blob/main/CONTRIBUTING.md)
 
 ---
 
