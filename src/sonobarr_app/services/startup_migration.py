@@ -115,10 +115,11 @@ def _migrate_json(settings_file: Path, app, logger: logging.Logger) -> None:
     appsettings.set("openai_max_seed_artists", str(data.get("openai_max_seed_artists", "5")))
     appsettings.set("api_key", data.get("api_key", "") or "")
 
-    user_count = db.session.execute(text("SELECT count(*) FROM users")).scalar() or 0
+    from sqlalchemy import text as sa_text
+    user_count = db.session.execute(sa_text("SELECT count(*) FROM users")).scalar() or 0
     if user_count > 0:
         db.session.execute(
-            text("UPDATE users SET wizard_completed = 1, lidarr_server_id = :sid"),
+            sa_text("UPDATE users SET wizard_completed = 1, lidarr_server_id = :sid"),
             {"sid": server.id},
         )
         logger.info("Startup migration: assigned %d existing users to server '%s'", user_count, server.name)
