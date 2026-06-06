@@ -4,7 +4,7 @@ Moves external API key configuration from global environment variables
 to per-user database columns, enabling personalized API access.
 
 Revision ID: 20251223_02
-Revises: 20251222_01
+Revises: 20260303_01
 Create Date: 2025-12-23 17:00:00
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision = "20251223_02"
-down_revision = "20251222_01"
+down_revision = "20260303_01"
 branch_labels = None
 depends_on = None
 
