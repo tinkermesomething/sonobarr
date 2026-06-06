@@ -42,9 +42,18 @@ def _authenticate(username: str, password: str):
     return redirect(url_for(_HOME_ENDPOINT))
 
 
+def _oidc_only() -> bool:
+    """Check OIDC_ONLY from DB (env as fallback for backward compat)."""
+    try:
+        from ..services import app_settings as appsettings
+        return appsettings.get_bool("oidc_only", current_app.config.get("OIDC_ONLY", False))
+    except Exception:
+        return bool(current_app.config.get("OIDC_ONLY", False))
+
+
 @bp.get("/login")
 def login():
-    if current_app.config.get("OIDC_ONLY"):
+    if _oidc_only():
         return redirect(url_for('oidc_auth.login'))
     if current_user.is_authenticated:
         return redirect(url_for(_HOME_ENDPOINT))
@@ -53,7 +62,7 @@ def login():
 
 @bp.post("/login")
 def login_submit():
-    if current_app.config.get("OIDC_ONLY"):
+    if _oidc_only():
         flash("Password login is disabled.", "warning")
         return redirect(url_for('oidc_auth.login'))
     if current_user.is_authenticated:

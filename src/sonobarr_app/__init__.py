@@ -9,7 +9,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .bootstrap import bootstrap_super_admin
+from .bootstrap import bootstrap_first_admin
 from .config import Config, STATIC_DIR, TEMPLATE_DIR
 from .extensions import csrf, db, login_manager, migrate, socketio
 from .services.data_handler import DataHandler
@@ -90,7 +90,12 @@ def create_app(config_class: type[Config] = Config) -> Flask:
     _configure_logging(app)
     _init_core_extensions(app)
     _register_user_loader()
-    
+
+    # Run startup migration (JSON → DB) before DataHandler loads settings from DB
+    with app.app_context():
+        from .services import startup_migration
+        startup_migration.run(app, app.logger)
+
     data_handler = _initialize_services(app)
 
     # Blueprints ------------------------------------------------------
@@ -266,7 +271,8 @@ def _run_database_initialisation(app: Flask, data_handler: DataHandler) -> None:
     with app.app_context():
         db.create_all()
         _ensure_user_profile_columns(app.logger)
-        bootstrap_super_admin(app.logger, data_handler)
+        bootstrap_first_admin(app.logger)
+        data_handler.reload_settings_from_db()
 
 
 def _ensure_user_profile_columns(logger: logging.Logger) -> None:

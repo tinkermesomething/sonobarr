@@ -5,41 +5,22 @@ from ..models import db, User
 
 oidc_auth_bp = Blueprint('oidc_auth', __name__)
 
-def _check_oidc_admin_group(user_info):
-    """
-    Check if user is in the configured OIDC admin group.
-    Returns True if user should have admin privileges based on group membership.
-    """
-    admin_group = current_app.config.get('OIDC_ADMIN_GROUP', '').strip()
+def _check_oidc_admin_group(user_info) -> bool:
+    """Check if user is in the configured OIDC admin group (DB-backed, env fallback)."""
+    from ..services import app_settings as appsettings
+    admin_group = (appsettings.get("oidc_admin_group") or current_app.config.get('OIDC_ADMIN_GROUP', '') or '').strip()
 
-    # If no admin group is configured, return False (no auto-promotion)
     if not admin_group:
         return False
 
-    # Check for groups in userinfo
-    # Different OIDC providers send groups in different formats:
-    # - Some send as 'groups': ['admin', 'users']
-    # - Some send as 'roles': ['admin']
-    # - Some send as 'memberOf': ['cn=admin,ou=groups,dc=example,dc=com']
     user_groups = user_info.get('groups', [])
-
-    # Handle case where groups might be a string instead of list
     if isinstance(user_groups, str):
         user_groups = [user_groups]
 
-    # Check if user is in the admin group
     is_admin = admin_group in user_groups
-
-    # Log for debugging
-    if user_groups:
-        current_app.logger.info(
-            f"OIDC user groups: {user_groups}, admin group: {admin_group}, is_admin: {is_admin}"
-        )
-    else:
-        current_app.logger.info(
-            f"OIDC user has no groups claim. Looking for group: {admin_group}"
-        )
-
+    current_app.logger.info(
+        "OIDC groups: %s, admin group: %s, is_admin: %s", user_groups or "(none)", admin_group, is_admin
+    )
     return is_admin
 
 
@@ -76,50 +57,46 @@ def callback():
     user = User.query.filter_by(oidc_id=oidc_user_id).first()
 
     if not user:
-        # If user does not exist, create a new one.
-        # Use a preferred claim for the username, like 'email' or 'preferred_username'
         username = user_info.get('email') or user_info.get('preferred_username')
         if not username:
             flash("OIDC token must provide 'email' or 'preferred_username' claim.", "error")
             return redirect(url_for("auth.login"))
 
-        # Check if username already exists from a local account
         if User.query.filter_by(username=username).first():
-            flash(f"User '{username}' already exists. Please login with your password and link your OIDC account in your profile.", "error")
-            # Note: This guide does not include account linking, which would be a future enhancement.
+            flash(f"User '{username}' already exists. Log in with your password to link your OIDC account.", "error")
             return redirect(url_for("auth.login"))
 
         user = User(
             oidc_id=oidc_user_id,
             username=username,
             display_name=user_info.get('name', username),
-            is_admin=is_admin_via_group  # Set admin status based on groups
-            # Password can be left null for OIDC-only users
+            is_admin=is_admin_via_group,
+            wizard_completed=False,
         )
         db.session.add(user)
+        db.session.flush()
+
+        # First user ever → unconditional admin regardless of group config
+        from ..bootstrap import promote_if_first_user
+        was_promoted = promote_if_first_user(user, current_app.logger)
+        if was_promoted:
+            current_app.logger.info("OIDC user '%s' is the first user — promoted to admin.", username)
+        elif is_admin_via_group:
+            current_app.logger.info("OIDC user '%s' granted admin via group membership.", username)
+
         db.session.commit()
-
-        if is_admin_via_group:
-            current_app.logger.info(
-                f"New OIDC user '{username}' created with admin privileges via group membership"
-            )
     else:
-        # Existing OIDC user: sync admin status on every login
-        # This ensures group changes in the OIDC provider are reflected
+        # Existing user: sync group-based admin status (never demote the first/sole admin)
         old_admin_status = user.is_admin
-        user.is_admin = is_admin_via_group
+        admin_count = User.query.filter_by(is_admin=True).count()
+        if not (user.is_admin and admin_count <= 1 and not is_admin_via_group):
+            user.is_admin = is_admin_via_group
 
-        if old_admin_status != is_admin_via_group:
+        if old_admin_status != user.is_admin:
             db.session.commit()
-            status_change = "promoted to admin" if is_admin_via_group else "demoted from admin"
-            current_app.logger.info(
-                f"OIDC user '{user.username}' {status_change} via group sync"
-            )
-
-            if is_admin_via_group:
-                flash(f"Welcome back! You have been granted admin privileges.", "success")
-            else:
-                flash(f"Welcome back! Your admin privileges have been removed.", "warning")
+            status_change = "promoted to admin" if user.is_admin else "demoted from admin"
+            current_app.logger.info("OIDC user '%s' %s via group sync.", user.username, status_change)
+            flash(f"Welcome back! You have been {'granted admin privileges' if user.is_admin else 'removed from admin'}.", "success" if user.is_admin else "warning")
 
     login_user(user)
     return redirect(url_for('main.home'))

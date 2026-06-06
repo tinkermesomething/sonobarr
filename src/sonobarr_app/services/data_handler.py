@@ -1513,7 +1513,7 @@ class DataHandler:
 
             self._configure_openai_client()
             self._configure_listening_services()
-            self.save_config_to_file()
+            self._save_to_db()
             self.broadcast_personal_sources_state()
         except Exception as exc:
             self.logger.error(f"Failed to update settings: {exc}")
@@ -1951,60 +1951,108 @@ class DataHandler:
             return f"{count / 1_000:.1f}K"
         return str(count)
 
-    def save_config_to_file(self) -> None:
-        tmp_path: Optional[Path] = None
+    def _save_to_db(self) -> None:
+        """Persist current settings to DB (LidarrServer + AppSetting tables)."""
+        if self._flask_app is None:
+            return
         try:
-            self.settings_config_file.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "lidarr_address": self.lidarr_address,
-                "lidarr_api_key": self.lidarr_api_key,
-                "root_folder_path": self.root_folder_path,
-                "fallback_to_top_result": self.fallback_to_top_result,
-                "lidarr_api_timeout": float(self.lidarr_api_timeout),
-                "quality_profile_id": self.quality_profile_id,
-                "metadata_profile_id": self.metadata_profile_id,
-                "search_for_missing_albums": self.search_for_missing_albums,
-                "dry_run_adding_to_lidarr": self.dry_run_adding_to_lidarr,
-                "lidarr_monitor_option": self.lidarr_monitor_option,
-                "lidarr_monitored": self.lidarr_monitored,
-                "lidarr_albums_to_monitor": self.lidarr_albums_to_monitor,
-                "lidarr_monitor_new_items": self.lidarr_monitor_new_items,
-                "app_name": self.app_name,
-                "app_rev": self.app_rev,
-                "app_url": self.app_url,
-                "last_fm_api_key": self.last_fm_api_key,
-                "last_fm_api_secret": self.last_fm_api_secret,
-                "auto_start": self.auto_start,
-                "auto_start_delay": self.auto_start_delay,
-                "youtube_api_key": self.youtube_api_key,
-                "similar_artist_batch_size": self.similar_artist_batch_size,
-                "openai_api_key": self.openai_api_key,
-                "openai_model": self.openai_model,
-                "openai_api_base": self.openai_api_base,
-                "openai_extra_headers": self.openai_extra_headers,
-                "openai_max_seed_artists": self.openai_max_seed_artists,
-                "api_key": self.api_key,
-            }
+            with self._flask_app.app_context():
+                self.__write_settings_to_db()
+        except Exception as exc:
+            self.logger.error("Error saving settings to DB: %s", exc)
 
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self.settings_config_file.parent,
-                delete=False,
-            ) as tmp_file:
-                json.dump(payload, tmp_file, indent=4)
-                tmp_file.flush()
-                os.fchmod(tmp_file.fileno(), 0o600)
-                os.fsync(tmp_file.fileno())
-                tmp_path = Path(tmp_file.name)
+    def __write_settings_to_db(self) -> None:
+        from ..models import LidarrServer
+        from ..extensions import db
+        from . import app_settings as appsettings
 
-            os.replace(tmp_path, self.settings_config_file)
-            os.chmod(self.settings_config_file, 0o600)
-        except Exception as exc:  # pragma: no cover - filesystem errors
-            self.logger.error(f"Error Saving Config: {exc}")
-        finally:
-            if tmp_path and tmp_path.exists():
-                tmp_path.unlink(missing_ok=True)
+        server = LidarrServer.query.filter_by(is_active=True).first()
+        if server is None:
+            from datetime import datetime
+            server = LidarrServer(name="Default", url="", api_key="",
+                                  is_active=True, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+            db.session.add(server)
+
+        server.url = self.lidarr_address or ""
+        server.api_key = self.lidarr_api_key or ""
+        server.root_folder_path = self.root_folder_path or ""
+        server.quality_profile_id = self.quality_profile_id or 1
+        server.metadata_profile_id = self.metadata_profile_id or 1
+        server.api_timeout = float(self.lidarr_api_timeout or 120.0)
+        server.fallback_to_top_result = bool(self.fallback_to_top_result)
+        server.search_for_missing_albums = bool(self.search_for_missing_albums)
+        server.dry_run = bool(self.dry_run_adding_to_lidarr)
+        server.monitor_option = self.lidarr_monitor_option or ""
+        server.monitored = bool(self.lidarr_monitored)
+        server.monitor_new_items = self.lidarr_monitor_new_items or ""
+        albums = self.lidarr_albums_to_monitor
+        server.albums_to_monitor = "\n".join(albums) if isinstance(albums, list) else (albums or "")
+
+        appsettings.set("similar_artist_batch_size", str(self.similar_artist_batch_size))
+        appsettings.set("auto_start", "true" if self.auto_start else "false")
+        appsettings.set("auto_start_delay", str(self.auto_start_delay))
+        appsettings.set("last_fm_api_key", self.last_fm_api_key or "")
+        appsettings.set("last_fm_api_secret", self.last_fm_api_secret or "")
+        appsettings.set("youtube_api_key", self.youtube_api_key or "")
+        appsettings.set("openai_api_key", self.openai_api_key or "")
+        appsettings.set("openai_model", self.openai_model or "")
+        appsettings.set("openai_api_base", self.openai_api_base or "")
+        appsettings.set("openai_extra_headers", self.openai_extra_headers or "")
+        appsettings.set("openai_max_seed_artists", str(self.openai_max_seed_artists))
+        appsettings.set("api_key", self.api_key or "")
+
+        db.session.commit()
+
+    def reload_settings_from_db(self) -> None:
+        """Reload lidarr and app settings from DB into memory. Call after startup migration."""
+        if self._flask_app is None:
+            return
+        try:
+            with self._flask_app.app_context():
+                self._load_from_db()
+        except Exception as exc:
+            self.logger.error("Error loading settings from DB: %s", exc)
+
+    def _load_from_db(self) -> None:
+        from ..models import LidarrServer
+        from . import app_settings as appsettings
+
+        server = LidarrServer.query.filter_by(is_active=True).first()
+        if server:
+            self.lidarr_address = server.url or ""
+            self.lidarr_api_key = server.api_key or ""
+            self.root_folder_path = server.root_folder_path or "/data/media/music/"
+            self.quality_profile_id = server.quality_profile_id or 1
+            self.metadata_profile_id = server.metadata_profile_id or 1
+            self.lidarr_api_timeout = float(server.api_timeout or 120.0)
+            self.fallback_to_top_result = bool(server.fallback_to_top_result)
+            self.search_for_missing_albums = bool(server.search_for_missing_albums)
+            self.dry_run_adding_to_lidarr = bool(server.dry_run)
+            self.lidarr_monitor_option = self._normalize_monitor_option(server.monitor_option or "")
+            self.lidarr_monitored = bool(server.monitored)
+            self.lidarr_monitor_new_items = self._normalize_monitor_new_items(server.monitor_new_items or "")
+            self.lidarr_albums_to_monitor = self._parse_albums_to_monitor(server.albums_to_monitor or "")
+
+        self.similar_artist_batch_size = appsettings.get_int("similar_artist_batch_size", 10)
+        self.auto_start = appsettings.get_bool("auto_start", False)
+        self.auto_start_delay = appsettings.get_float("auto_start_delay", 60.0)
+        self.last_fm_api_key = appsettings.get("last_fm_api_key") or ""
+        self.last_fm_api_secret = appsettings.get("last_fm_api_secret") or ""
+        self.youtube_api_key = appsettings.get("youtube_api_key") or ""
+        self.openai_api_key = appsettings.get("openai_api_key") or ""
+        self.openai_model = appsettings.get("openai_model") or ""
+        self.openai_api_base = appsettings.get("openai_api_base") or ""
+        self.openai_extra_headers = appsettings.get("openai_extra_headers") or ""
+        self.openai_max_seed_artists = appsettings.get_int("openai_max_seed_artists", DEFAULT_MAX_SEED_ARTISTS)
+        db_api_key = appsettings.get("api_key") or ""
+        if not self.api_key:
+            self.api_key = db_api_key
+
+        self._configure_openai_client()
+        self._configure_listening_services()
+
+        if self._flask_app and self.api_key:
+            self._flask_app.config['API_KEY'] = self.api_key
 
     def get_mbid_from_musicbrainz(self, artist_name: str) -> Optional[str]:
         result = musicbrainzngs.search_artists(artist=artist_name)
@@ -2092,169 +2140,32 @@ class DataHandler:
             return []
 
     def load_environ_or_config_settings(self) -> None:
-        default_settings = {
-            "lidarr_address": "",
-            "lidarr_api_key": "",
-            "root_folder_path": "/data/media/music/",
-            "fallback_to_top_result": False,
-            "lidarr_api_timeout": 120.0,
-            "quality_profile_id": 1,
-            "metadata_profile_id": 1,
-            "search_for_missing_albums": False,
-            "dry_run_adding_to_lidarr": False,
-            "lidarr_monitor_option": "",
-            "lidarr_monitored": True,
-            "lidarr_albums_to_monitor": [],
-            "lidarr_monitor_new_items": "",
-            "app_name": "Sonobarr",
-            "app_rev": "0.10",
-            "app_url": "https://" + "".join(random.choices(string.ascii_lowercase, k=10)) + ".com",  # NOSONAR(S2245)
-            "last_fm_api_key": "",
-            "last_fm_api_secret": "",
-            "auto_start": False,
-            "auto_start_delay": 60,
-            "youtube_api_key": "",
-            "similar_artist_batch_size": 10,
-            "openai_api_key": "",
-            "openai_model": "",
-            "openai_api_base": "",
-            "openai_extra_headers": "",
-            "openai_max_seed_artists": DEFAULT_MAX_SEED_ARTISTS,
-            "api_key": "",
-            "sonobarr_superadmin_username": "admin",
-            "sonobarr_superadmin_password": "",
-            "sonobarr_superadmin_display_name": "Super Admin",
-            "sonobarr_superadmin_reset": "false",
-        }
-
-        self.lidarr_address = self._env("lidarr_address")
-        self.lidarr_api_key = self._env("lidarr_api_key")
-        self.youtube_api_key = self._env("youtube_api_key")
-        self.root_folder_path = self._env("root_folder_path")
-
-        fallback_to_top_result = self._env("fallback_to_top_result")
-        self.fallback_to_top_result = (
-            fallback_to_top_result.lower() == "true" if fallback_to_top_result != "" else ""
-        )
-
-        lidarr_api_timeout = self._env("lidarr_api_timeout")
-        self.lidarr_api_timeout = float(lidarr_api_timeout) if lidarr_api_timeout else ""
-
-        quality_profile_id = self._env("quality_profile_id")
-        self.quality_profile_id = int(quality_profile_id) if quality_profile_id else ""
-
-        metadata_profile_id = self._env("metadata_profile_id")
-        self.metadata_profile_id = int(metadata_profile_id) if metadata_profile_id else ""
-
-        search_for_missing_albums = self._env("search_for_missing_albums")
-        self.search_for_missing_albums = (
-            search_for_missing_albums.lower() == "true" if search_for_missing_albums != "" else ""
-        )
-
-        dry_run_adding_to_lidarr = self._env("dry_run_adding_to_lidarr")
-        self.dry_run_adding_to_lidarr = (
-            dry_run_adding_to_lidarr.lower() == "true" if dry_run_adding_to_lidarr != "" else ""
-        )
-
-        monitor_option_env = self._env("lidarr_monitor_option")
-        self.lidarr_monitor_option = (
-            self._normalize_monitor_option(monitor_option_env) if monitor_option_env else ""
-        )
-
-        monitor_new_items_env = self._env("lidarr_monitor_new_items")
-        self.lidarr_monitor_new_items = (
-            self._normalize_monitor_new_items(monitor_new_items_env) if monitor_new_items_env else ""
-        )
-
-        monitored_env = self._env("lidarr_monitored")
-        if monitored_env == "":
-            self.lidarr_monitored = ""
-        else:
-            monitored_bool = self._coerce_bool(monitored_env)
-            self.lidarr_monitored = monitored_bool if monitored_bool is not None else ""
-
-        albums_env = self._env("lidarr_albums_to_monitor")
-        self.lidarr_albums_to_monitor = (
-            self._parse_albums_to_monitor(albums_env) if albums_env else ""
-        )
-
-        self.app_name = self._env("app_name")
-        self.app_rev = self._env("app_rev")
-        self.app_url = self._env("app_url")
-        self.last_fm_api_key = self._env("last_fm_api_key")
-        self.last_fm_api_secret = self._env("last_fm_api_secret")
-        self.openai_api_key = self._env("openai_api_key")
-        self.openai_model = self._env("openai_model")
-        self.openai_api_base = self._env("openai_api_base")
-        self.openai_extra_headers = self._env("openai_extra_headers")
-        openai_max_seed = self._env("openai_max_seed_artists")
-        self.openai_max_seed_artists = int(openai_max_seed) if openai_max_seed else ""
+        """Set defaults at init time. DB settings are loaded later via reload_settings_from_db()."""
+        # Only api_key can still come from env (server-level auth key for the REST API)
         self.api_key = self._env("api_key")
 
-        auto_start = self._env("auto_start")
-        self.auto_start = auto_start.lower() == "true" if auto_start != "" else ""
-
-        auto_start_delay = self._env("auto_start_delay")
-        self.auto_start_delay = float(auto_start_delay) if auto_start_delay else ""
-
-        similar_artist_batch_size = self._env("similar_artist_batch_size")
-        if similar_artist_batch_size:
-            self.similar_artist_batch_size = similar_artist_batch_size
-
-        superadmin_username = self._env("sonobarr_superadmin_username")
-        superadmin_password = self._env("sonobarr_superadmin_password")
-        superadmin_display_name = self._env("sonobarr_superadmin_display_name")
-        superadmin_reset = self._env("sonobarr_superadmin_reset")
-
-        self.superadmin_username = (superadmin_username or "").strip() or default_settings["sonobarr_superadmin_username"]
-        self.superadmin_password = (superadmin_password or "").strip() or default_settings["sonobarr_superadmin_password"]
-        self.superadmin_display_name = (superadmin_display_name or "").strip() or default_settings["sonobarr_superadmin_display_name"]
-        reset_raw = (superadmin_reset or "").strip().lower()
-        self.superadmin_reset_flag = reset_raw in {"1", "true", "yes"}
-
-        try:
-            if self.settings_config_file.exists():
-                self.logger.info("Loading Config via file")
-                with self.settings_config_file.open("r", encoding="utf-8") as json_file:
-                    ret = json.load(json_file)
-                    for key in ret:
-                        if getattr(self, key, "") == "":
-                            setattr(self, key, ret[key])
-        except Exception as exc:  # pragma: no cover - filesystem errors
-            self.logger.error(f"Error Loading Config: {exc}")
-
-        self.openai_extra_headers = self._normalize_openai_headers_field(self.openai_extra_headers)
-
-        for key, value in default_settings.items():
-            if getattr(self, key, "") == "":
-                setattr(self, key, value)
-
-        self.lidarr_monitor_option = self._normalize_monitor_option(self.lidarr_monitor_option)
-        self.lidarr_monitor_new_items = self._normalize_monitor_new_items(self.lidarr_monitor_new_items)
-        monitored_bool = self._coerce_bool(self.lidarr_monitored)
-        self.lidarr_monitored = monitored_bool if monitored_bool is not None else bool(default_settings["lidarr_monitored"])
-        if not isinstance(self.lidarr_albums_to_monitor, list):
-            self.lidarr_albums_to_monitor = self._parse_albums_to_monitor(self.lidarr_albums_to_monitor)
-
-        try:
-            self.similar_artist_batch_size = int(self.similar_artist_batch_size)
-        except (TypeError, ValueError):
-            self.similar_artist_batch_size = default_settings["similar_artist_batch_size"]
-        if self.similar_artist_batch_size <= 0:
-            self.similar_artist_batch_size = default_settings["similar_artist_batch_size"]
-
-        try:
-            self.openai_max_seed_artists = int(self.openai_max_seed_artists)
-        except (TypeError, ValueError):
-            self.openai_max_seed_artists = default_settings["openai_max_seed_artists"]
-        if self.openai_max_seed_artists <= 0:
-            self.openai_max_seed_artists = default_settings["openai_max_seed_artists"]
-
-        try:
-            self.lidarr_api_timeout = float(self.lidarr_api_timeout)
-        except (TypeError, ValueError):
-            self.lidarr_api_timeout = float(default_settings["lidarr_api_timeout"])
+        # Apply safe defaults for all settings — DB values override these once loaded
+        self.lidarr_address = ""
+        self.lidarr_api_key = ""
+        self.root_folder_path = "/data/media/music/"
+        self.fallback_to_top_result = False
+        self.lidarr_api_timeout = 120.0
+        self.quality_profile_id = 1
+        self.metadata_profile_id = 1
+        self.search_for_missing_albums = False
+        self.dry_run_adding_to_lidarr = False
+        self.lidarr_monitor_option = ""
+        self.lidarr_monitored = True
+        self.lidarr_albums_to_monitor = []
+        self.lidarr_monitor_new_items = ""
+        self.last_fm_api_key = ""
+        self.last_fm_api_secret = ""
+        self.auto_start = False
+        self.auto_start_delay = 60.0
+        self.youtube_api_key = ""
+        self.similar_artist_batch_size = 10
+        self.openai_max_seed_artists = DEFAULT_MAX_SEED_ARTISTS
+        self.openai_extra_headers = ""
 
         self._configure_openai_client()
         self._configure_listening_services()
-        self.save_config_to_file()
