@@ -1110,9 +1110,10 @@ class DataHandler:
         session.similar_artist_batch_pointer = 0
         session.initial_batch_sent = False
 
+        user = self._resolve_user(session.user_id)
         lfm = pylast.LastFMNetwork(
-            api_key=self.last_fm_api_key,
-            api_secret=self.last_fm_api_secret,
+            api_key=self.get_lastfm_api_key(user),
+            api_secret=self.get_lastfm_api_secret(user),
         )
 
         seen_candidates = set()
@@ -1167,9 +1168,10 @@ class DataHandler:
             self.socketio.emit("load_more_complete", {"hasMore": False}, room=sid)
             return
 
+        user = self._resolve_user(session.user_id)
         lfm_network = pylast.LastFMNetwork(
-            api_key=self.last_fm_api_key,
-            api_secret=self.last_fm_api_secret,
+            api_key=self.get_lastfm_api_key(user),
+            api_secret=self.get_lastfm_api_secret(user),
         )
 
         existing_names = {unidecode(item["Name"]).lower() for item in session.recommended_artists}
@@ -1754,13 +1756,14 @@ class DataHandler:
         names: Sequence[str],
         *,
         missing: Optional[List[str]] = None,
+        user=None,
     ) -> Iterable[dict]:
         if not names:
             return []
 
         lfm_network = pylast.LastFMNetwork(
-            api_key=self.last_fm_api_key,
-            api_secret=self.last_fm_api_secret,
+            api_key=self.get_lastfm_api_key(user),
+            api_secret=self.get_lastfm_api_secret(user),
         )
 
         seen: set[str] = set()
@@ -1816,7 +1819,8 @@ class DataHandler:
         missing_names: List[str] = []
         streamed_any = False
 
-        for payload in self._iter_artist_payloads_from_names(seeds, missing=missing_names):
+        user = self._resolve_user(session.user_id)
+        for payload in self._iter_artist_payloads_from_names(seeds, missing=missing_names, user=user):
             normalized = unidecode(payload["Name"]).lower()
             if normalized in existing_names:
                 continue
