@@ -31,6 +31,11 @@
               <i class="fa-solid fa-music"></i>
               <span>Artist Requests</span>
             </a>
+            <a class="nav-link {% if active_tab == 'lidarr' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
+               href="{{ url_for('main.settings', tab='lidarr') }}">
+              <i class="fa-solid fa-server"></i>
+              <span>Lidarr Servers</span>
+            </a>
             <a class="nav-link {% if active_tab == 'system' %}active bg-primary text-white{% endif %} d-flex align-items-center gap-2 px-3 py-2"
                href="{{ url_for('main.settings', tab='system') }}">
               <i class="fa-solid fa-gear"></i>
@@ -221,6 +226,7 @@
                           <th scope="col">Display name</th>
                           <th scope="col">Auth</th>
                           <th scope="col">Role</th>
+                          <th scope="col">Lidarr Server</th>
                           <th scope="col" class="text-end">Actions</th>
                         </tr>
                       </thead>
@@ -242,6 +248,20 @@
                             {% else %}
                             <span class="badge bg-secondary">User</span>
                             {% endif %}
+                          </td>
+                          <td>
+                            <form method="post" action="{{ url_for('main.update_settings') }}" class="d-flex align-items-center gap-1">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                              <input type="hidden" name="tab" value="users">
+                              <input type="hidden" name="action" value="assign_server">
+                              <input type="hidden" name="user_id" value="{{ user.id }}">
+                              <select name="lidarr_server_id" class="form-select form-select-sm" style="min-width:120px" onchange="this.form.submit()">
+                                <option value="">— none —</option>
+                                {% for srv in all_lidarr_servers %}
+                                <option value="{{ srv.id }}" {% if user.lidarr_server_id == srv.id %}selected{% endif %}>{{ srv.name }}</option>
+                                {% endfor %}
+                              </select>
+                            </form>
                           </td>
                           <td class="text-end">
                             {% if user.id != current_user.id %}
@@ -328,6 +348,275 @@
               {% endif %}
             </div>
           </div>
+
+          {% elif active_tab == 'lidarr' %}
+          <!-- Lidarr Servers -->
+          <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h4 mb-0">Lidarr Servers</h2>
+            <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#lidarrServerForm" aria-expanded="{% if edit_server %}true{% else %}false{% endif %}">
+              <i class="fa-solid fa-plus me-1"></i>Add server
+            </button>
+          </div>
+
+          <!-- Add / Edit form -->
+          <div class="collapse {% if edit_server %}show{% endif %} mb-4" id="lidarrServerForm">
+            <div class="card border-primary">
+              <div class="card-header bg-primary text-white fw-semibold">
+                {% if edit_server %}Edit: {{ edit_server.name }}{% else %}Add Lidarr Server{% endif %}
+              </div>
+              <div class="card-body">
+                <form method="post" action="{{ url_for('main.update_settings') }}" id="lidarr-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="tab" value="lidarr">
+                  <input type="hidden" name="action" value="{% if edit_server %}edit{% else %}add{% endif %}">
+                  {% if edit_server %}<input type="hidden" name="server_id" value="{{ edit_server.id }}">{% endif %}
+
+                  <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                      <label class="form-label fw-semibold">Server Name</label>
+                      <input type="text" class="form-control" name="name" value="{{ edit_server.name if edit_server else '' }}" placeholder="e.g. Main Lidarr" required>
+                    </div>
+                    <div class="col-md-5">
+                      <label class="form-label fw-semibold">Lidarr URL</label>
+                      <input type="url" class="form-control" id="lidarr-url" name="url" value="{{ edit_server.url if edit_server else '' }}" placeholder="http://192.168.1.1:8686" required>
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label fw-semibold">API Key</label>
+                      <input type="text" class="form-control" id="lidarr-api-key" name="api_key" value="{{ edit_server.api_key if edit_server else '' }}" placeholder="Lidarr API key" required>
+                    </div>
+                  </div>
+
+                  <div class="mb-3">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="test-btn" onclick="testLidarrConnection()">
+                      <i class="fa-solid fa-plug me-1"></i>Test connection &amp; load profiles
+                    </button>
+                    <span id="test-status" class="ms-2 small"></span>
+                  </div>
+
+                  <div class="row g-3 mb-3" id="profile-fields">
+                    <div class="col-md-4">
+                      <label class="form-label">Root Folder Path</label>
+                      <div id="root-folder-wrap">
+                        <input type="text" class="form-control" id="root-folder-text" name="root_folder_path" value="{{ edit_server.root_folder_path if edit_server else '' }}" placeholder="/data/media/music/">
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Quality Profile</label>
+                      <div id="quality-profile-wrap">
+                        <input type="number" class="form-control" id="quality-profile-num" name="quality_profile_id" value="{{ edit_server.quality_profile_id if edit_server else '1' }}" min="1">
+                      </div>
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Metadata Profile</label>
+                      <div id="metadata-profile-wrap">
+                        <input type="number" class="form-control" id="metadata-profile-num" name="metadata_profile_id" value="{{ edit_server.metadata_profile_id if edit_server else '1' }}" min="1">
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Advanced settings (collapsed) -->
+                  <div class="mb-3">
+                    <button class="btn btn-link btn-sm p-0 text-muted" type="button" data-bs-toggle="collapse" data-bs-target="#lidarr-advanced">
+                      Advanced settings <i class="fa-solid fa-chevron-down ms-1"></i>
+                    </button>
+                  </div>
+                  <div class="collapse {% if edit_server %}show{% endif %}" id="lidarr-advanced">
+                    <div class="row g-3 mb-3">
+                      <div class="col-md-3">
+                        <label class="form-label">API Timeout (s)</label>
+                        <input type="number" class="form-control" name="api_timeout" value="{{ edit_server.api_timeout if edit_server else '120' }}" min="1">
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label">Monitor Option</label>
+                        <select class="form-select" name="monitor_option">
+                          {% for opt in ['', 'all', 'future', 'missing', 'existing', 'latest', 'first', 'none', 'unknown'] %}
+                          <option value="{{ opt }}" {% if edit_server and edit_server.monitor_option == opt %}selected{% endif %}>{{ opt or 'Lidarr default' }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label">Monitor New Items</label>
+                        <select class="form-select" name="monitor_new_items">
+                          {% for opt in ['', 'all', 'new', 'none'] %}
+                          <option value="{{ opt }}" {% if edit_server and edit_server.monitor_new_items == opt %}selected{% endif %}>{{ opt or 'Lidarr default' }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-3">
+                        <label class="form-label">Albums to Monitor</label>
+                        <textarea class="form-control" name="albums_to_monitor" rows="2" placeholder="One album ID per line">{{ edit_server.albums_to_monitor if edit_server else '' }}</textarea>
+                      </div>
+                    </div>
+                    <div class="row g-3 mb-3">
+                      <div class="col-auto">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" name="fallback_to_top_result" id="fallback" {% if edit_server and edit_server.fallback_to_top_result %}checked{% endif %}>
+                          <label class="form-check-label" for="fallback">Fallback to top result</label>
+                        </div>
+                      </div>
+                      <div class="col-auto">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" name="search_for_missing_albums" id="search-missing" {% if edit_server and edit_server.search_for_missing_albums %}checked{% endif %}>
+                          <label class="form-check-label" for="search-missing">Search for missing albums</label>
+                        </div>
+                      </div>
+                      <div class="col-auto">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" name="dry_run" id="dry-run" {% if edit_server and edit_server.dry_run %}checked{% endif %}>
+                          <label class="form-check-label" for="dry-run">Dry run (simulate adds)</label>
+                        </div>
+                      </div>
+                      <div class="col-auto">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" name="monitored" id="monitored" {% if not edit_server or edit_server.monitored %}checked{% endif %}>
+                          <label class="form-check-label" for="monitored">Monitor added artists</label>
+                        </div>
+                      </div>
+                      <div class="col-auto">
+                        <div class="form-check form-switch">
+                          <input class="form-check-input" type="checkbox" name="is_active" id="is-active" {% if not edit_server or edit_server.is_active %}checked{% endif %}>
+                          <label class="form-check-label" for="is-active">Active (visible to users)</label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">{% if edit_server %}Save changes{% else %}Add server{% endif %}</button>
+                    <a href="{{ url_for('main.settings', tab='lidarr') }}" class="btn btn-outline-secondary">Cancel</a>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+
+          <!-- Server list -->
+          {% if lidarr_servers %}
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>URL</th>
+                  <th>Status</th>
+                  <th>Users</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for srv in lidarr_servers %}
+                <tr class="{% if not srv.is_active %}text-muted{% endif %}">
+                  <td class="fw-semibold">{{ srv.name }}</td>
+                  <td><code class="small">{{ srv.url }}</code></td>
+                  <td>
+                    {% if srv.is_active %}
+                    <span class="badge bg-success">Active</span>
+                    {% else %}
+                    <span class="badge bg-secondary">Inactive</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ srv.assigned_users | length }}</td>
+                  <td class="text-end d-flex gap-1 justify-content-end">
+                    <a href="{{ url_for('main.settings', tab='lidarr', edit=srv.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                    <form method="post" action="{{ url_for('main.update_settings') }}" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="tab" value="lidarr">
+                      <input type="hidden" name="action" value="toggle_active">
+                      <input type="hidden" name="server_id" value="{{ srv.id }}">
+                      <button type="submit" class="btn btn-sm btn-outline-secondary">{{ 'Disable' if srv.is_active else 'Enable' }}</button>
+                    </form>
+                    <form method="post" action="{{ url_for('main.update_settings') }}" class="d-inline"
+                          onsubmit="return confirm('Delete {{ srv.name }}? This cannot be undone.');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="tab" value="lidarr">
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="server_id" value="{{ srv.id }}">
+                      <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="alert alert-info">
+            No Lidarr servers configured yet. Add one above to get started.
+          </div>
+          {% endif %}
+
+          <script>
+          async function testLidarrConnection() {
+            const btn = document.getElementById('test-btn');
+            const status = document.getElementById('test-status');
+            const url = document.getElementById('lidarr-url').value.trim();
+            const apiKey = document.getElementById('lidarr-api-key').value.trim();
+
+            if (!url || !apiKey) {
+              status.innerHTML = '<span class="text-danger">Enter URL and API key first.</span>';
+              return;
+            }
+
+            btn.disabled = true;
+            status.innerHTML = '<span class="text-muted">Testing…</span>';
+
+            try {
+              const resp = await fetch('{{ url_for("admin.test_lidarr_connection") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}'},
+                body: JSON.stringify({url, api_key: apiKey}),
+              });
+              const data = await resp.json();
+
+              if (!data.success) {
+                status.innerHTML = `<span class="text-danger"><i class="fa-solid fa-xmark me-1"></i>${data.error}</span>`;
+                return;
+              }
+
+              status.innerHTML = '<span class="text-success"><i class="fa-solid fa-check me-1"></i>Connected!</span>';
+
+              // Root folder
+              const rfWrap = document.getElementById('root-folder-wrap');
+              const rfSel = buildSelect('root_folder_path', data.root_folders.map(p => ({id: p, name: p})),
+                                        document.getElementById('root-folder-text').value);
+              rfWrap.innerHTML = '';
+              rfWrap.appendChild(rfSel);
+
+              // Quality profiles
+              const qpWrap = document.getElementById('quality-profile-wrap');
+              const qpSel = buildSelect('quality_profile_id', data.quality_profiles,
+                                        document.getElementById('quality-profile-num').value);
+              qpWrap.innerHTML = '';
+              qpWrap.appendChild(qpSel);
+
+              // Metadata profiles
+              const mpWrap = document.getElementById('metadata-profile-wrap');
+              const mpSel = buildSelect('metadata_profile_id', data.metadata_profiles,
+                                        document.getElementById('metadata-profile-num').value);
+              mpWrap.innerHTML = '';
+              mpWrap.appendChild(mpSel);
+
+            } catch (e) {
+              status.innerHTML = `<span class="text-danger">${e.message}</span>`;
+            } finally {
+              btn.disabled = false;
+            }
+          }
+
+          function buildSelect(name, items, currentVal) {
+            const sel = document.createElement('select');
+            sel.name = name;
+            sel.className = 'form-select';
+            items.forEach(item => {
+              const opt = document.createElement('option');
+              opt.value = item.id;
+              opt.textContent = item.name;
+              if (String(item.id) === String(currentVal) || item.id === currentVal) opt.selected = true;
+              sel.appendChild(opt);
+            });
+            return sel;
+          }
+          </script>
 
           {% elif active_tab == 'system' %}
           <!-- System Configuration -->

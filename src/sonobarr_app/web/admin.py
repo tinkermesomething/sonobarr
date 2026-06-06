@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 
 from functools import wraps
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from ..extensions import db
-from ..models import User, ArtistRequest
+from ..models import User, ArtistRequest, LidarrServer
 
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -184,6 +184,46 @@ def _reject_artist_request(artist_request: ArtistRequest):
         rejected_artist = {"Name": artist_request.artist_name, "Status": "Rejected"}
         data_handler.socketio.emit("refresh_artist", rejected_artist)
     flash(f"Request for '{artist_request.artist_name}' rejected.", "success")
+
+
+@bp.post("/lidarr/test")
+@login_required
+@admin_required
+def test_lidarr_connection():
+    """Test a Lidarr URL+API key and return root folders + profiles as JSON."""
+    import requests as http
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").rstrip("/").strip()
+    api_key = (data.get("api_key") or "").strip()
+
+    if not url or not api_key:
+        return jsonify({"success": False, "error": "URL and API key are required."})
+
+    headers = {"X-Api-Key": api_key}
+    timeout = 10
+
+    try:
+        rf = http.get(f"{url}/api/v1/rootfolder", headers=headers, timeout=timeout)
+        rf.raise_for_status()
+        root_folders = [r["path"] for r in rf.json()]
+
+        qp = http.get(f"{url}/api/v1/qualityprofile", headers=headers, timeout=timeout)
+        qp.raise_for_status()
+        quality_profiles = [{"id": p["id"], "name": p["name"]} for p in qp.json()]
+
+        mp = http.get(f"{url}/api/v1/metadataprofile", headers=headers, timeout=timeout)
+        mp.raise_for_status()
+        metadata_profiles = [{"id": p["id"], "name": p["name"]} for p in mp.json()]
+
+        return jsonify({
+            "success": True,
+            "root_folders": root_folders,
+            "quality_profiles": quality_profiles,
+            "metadata_profiles": metadata_profiles,
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)})
 
 
 @bp.get("/users")

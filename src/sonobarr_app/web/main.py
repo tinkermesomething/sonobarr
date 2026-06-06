@@ -8,7 +8,7 @@ from flask import Blueprint, current_app, flash, redirect, render_template, requ
 from flask_login import current_user, login_required
 
 from ..extensions import db
-from ..models import User, ArtistRequest
+from ..models import User, ArtistRequest, LidarrServer
 
 
 bp = Blueprint("main", __name__)
@@ -36,33 +36,47 @@ def settings():
     # Get the active tab from query parameter, default to 'profile'
     active_tab = request.args.get("tab", "profile")
 
-    # Validate tab based on user permissions
     valid_tabs = ["profile"]
     if current_user.is_admin:
-        valid_tabs.extend(["users", "requests", "system"])
+        valid_tabs.extend(["users", "requests", "lidarr", "system"])
 
-    # Default to profile if invalid tab requested
     if active_tab not in valid_tabs:
         active_tab = "profile"
 
-    # Fetch users list for Users tab
     users = None
+    all_lidarr_servers = None
     if active_tab == "users" and current_user.is_admin:
         users = User.query.order_by(User.username).all()
+        all_lidarr_servers = LidarrServer.query.order_by(LidarrServer.name).all()
 
-    # Fetch pending artist requests for Requests tab
     artist_requests = None
     if active_tab == "requests" and current_user.is_admin:
         artist_requests = ArtistRequest.query.filter_by(status="pending").order_by(
             ArtistRequest.created_at.desc()
         ).all()
 
-    # Fetch current system configuration for System tab
+    lidarr_servers = None
+    edit_server = None
+    if active_tab == "lidarr" and current_user.is_admin:
+        lidarr_servers = LidarrServer.query.order_by(LidarrServer.name).all()
+        edit_server_id = request.args.get("edit", type=int)
+        if edit_server_id:
+            edit_server = LidarrServer.query.get(edit_server_id)
+
     system_config = None
     if active_tab == "system" and current_user.is_admin:
         system_config = _get_system_config()
 
-    return render_template("settings.html", active_tab=active_tab, users=users, artist_requests=artist_requests, system_config=system_config)
+    return render_template(
+        "settings.html",
+        active_tab=active_tab,
+        users=users,
+        all_lidarr_servers=all_lidarr_servers,
+        artist_requests=artist_requests,
+        lidarr_servers=lidarr_servers,
+        edit_server=edit_server,
+        system_config=system_config,
+    )
 
 
 @bp.post("/settings")
@@ -95,6 +109,8 @@ def update_settings():
             _edit_user(request.form)
         elif action == "delete":
             _delete_user(request.form)
+        elif action == "assign_server":
+            _assign_lidarr_server(request.form)
 
     elif tab == "requests" and current_user.is_admin:
         action = request.form.get("action")
@@ -106,6 +122,17 @@ def update_settings():
                 _reject_artist_request(artist_request)
             else:
                 flash("Invalid action.", "danger")
+
+    elif tab == "lidarr" and current_user.is_admin:
+        action = request.form.get("action")
+        if action == "add":
+            _add_lidarr_server(request.form)
+        elif action == "edit":
+            _edit_lidarr_server(request.form)
+        elif action == "delete":
+            _delete_lidarr_server(request.form)
+        elif action == "toggle_active":
+            _toggle_lidarr_server_active(request.form)
 
     elif tab == "system" and current_user.is_admin:
         _save_system_config(request.form)
@@ -472,14 +499,138 @@ def _save_system_config(form_data):
             "api_key": (form_data.get("api_key") or "").strip(),
         }
 
-        # Update settings and save to file
         data_handler.update_settings(payload)
-        data_handler.save_config_to_file()
         flash("Configuration saved successfully.", "success")
 
     except Exception as exc:
         current_app.logger.exception("Failed to save system configuration: %s", exc)
         flash("Failed to save configuration. Check the server logs for details.", "danger")
+
+
+# ── Lidarr server CRUD helpers ────────────────────────────────────────────────
+
+def _lidarr_server_from_form(form) -> dict:
+    """Extract and coerce LidarrServer fields from a form submission."""
+    def _bool(key): return form.get(key) == "on"
+    def _int(key, default=1):
+        try: return int(form.get(key) or default)
+        except (TypeError, ValueError): return default
+    def _float(key, default):
+        try: return float(form.get(key) or default)
+        except (TypeError, ValueError): return default
+
+    return {
+        "name": (form.get("name") or "").strip() or "Default",
+        "url": (form.get("url") or "").strip().rstrip("/"),
+        "api_key": (form.get("api_key") or "").strip(),
+        "root_folder_path": (form.get("root_folder_path") or "").strip(),
+        "quality_profile_id": _int("quality_profile_id"),
+        "metadata_profile_id": _int("metadata_profile_id"),
+        "api_timeout": _float("api_timeout", 120.0),
+        "fallback_to_top_result": _bool("fallback_to_top_result"),
+        "search_for_missing_albums": _bool("search_for_missing_albums"),
+        "dry_run": _bool("dry_run"),
+        "monitor_option": (form.get("monitor_option") or "").strip(),
+        "monitored": form.get("monitored") != "off",
+        "monitor_new_items": (form.get("monitor_new_items") or "").strip(),
+        "albums_to_monitor": (form.get("albums_to_monitor") or "").strip(),
+        "is_active": form.get("is_active") != "off",
+    }
+
+
+def _add_lidarr_server(form) -> None:
+    from datetime import datetime as dt
+    fields = _lidarr_server_from_form(form)
+    if not fields["url"]:
+        flash("Lidarr URL is required.", "danger")
+        return
+    server = LidarrServer(created_by_id=current_user.id, created_at=dt.utcnow(), updated_at=dt.utcnow(), **fields)
+    db.session.add(server)
+    db.session.commit()
+    _reload_data_handler()
+    flash(f"Server '{server.name}' added.", "success")
+
+
+def _edit_lidarr_server(form) -> None:
+    try:
+        server_id = int(form.get("server_id", 0))
+    except ValueError:
+        flash("Invalid server ID.", "danger")
+        return
+    server = LidarrServer.query.get(server_id)
+    if not server:
+        flash("Server not found.", "danger")
+        return
+    fields = _lidarr_server_from_form(form)
+    for key, value in fields.items():
+        setattr(server, key, value)
+    db.session.commit()
+    _reload_data_handler()
+    flash(f"Server '{server.name}' updated.", "success")
+
+
+def _delete_lidarr_server(form) -> None:
+    try:
+        server_id = int(form.get("server_id", 0))
+    except ValueError:
+        flash("Invalid server ID.", "danger")
+        return
+    server = LidarrServer.query.get(server_id)
+    if not server:
+        flash("Server not found.", "danger")
+        return
+    assigned = User.query.filter_by(lidarr_server_id=server_id).count()
+    if assigned > 0:
+        flash(f"Cannot delete '{server.name}' — {assigned} user(s) assigned. Reassign them first.", "danger")
+        return
+    db.session.delete(server)
+    db.session.commit()
+    _reload_data_handler()
+    flash(f"Server '{server.name}' deleted.", "success")
+
+
+def _toggle_lidarr_server_active(form) -> None:
+    try:
+        server_id = int(form.get("server_id", 0))
+    except ValueError:
+        flash("Invalid server ID.", "danger")
+        return
+    server = LidarrServer.query.get(server_id)
+    if not server:
+        flash("Server not found.", "danger")
+        return
+    server.is_active = not server.is_active
+    db.session.commit()
+    _reload_data_handler()
+    status = "enabled" if server.is_active else "disabled"
+    flash(f"Server '{server.name}' {status}.", "success")
+
+
+def _assign_lidarr_server(form) -> None:
+    try:
+        user_id = int(form.get("user_id", 0))
+    except ValueError:
+        flash("Invalid user ID.", "danger")
+        return
+    user = User.query.get(user_id)
+    if not user:
+        flash("User not found.", "danger")
+        return
+    raw = form.get("lidarr_server_id") or ""
+    try:
+        server_id = int(raw) if raw else None
+    except ValueError:
+        server_id = None
+    user.lidarr_server_id = server_id
+    db.session.commit()
+    server_name = LidarrServer.query.get(server_id).name if server_id else "none"
+    flash(f"Assigned '{user.username}' to server '{server_name}'.", "success")
+
+
+def _reload_data_handler() -> None:
+    dh = current_app.extensions.get("data_handler")
+    if dh:
+        dh.reload_settings_from_db()
 
 
 @bp.get("/profile")
