@@ -17,12 +17,31 @@ def run(app, logger: logging.Logger) -> None:
     from ..extensions import db
     from . import app_settings as appsettings
     from ..config import get_env_value
-    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+    from sqlalchemy import text, inspect as sa_inspect
+
+    # Guard: confirm all required tables and columns exist before doing anything.
+    # This handles the case where startup_migration.run() is called during
+    # `flask db upgrade`'s app import before migrations have been applied.
+    try:
+        inspector = sa_inspect(db.engine)
+        tables = set(inspector.get_table_names())
+        required = {"lidarr_servers", "app_settings", "users"}
+        if not required.issubset(tables):
+            logger.debug("Startup migration: required tables missing (%s), skipping.", required - tables)
+            return
+        user_cols = {c["name"] for c in inspector.get_columns("users")}
+        if "wizard_completed" not in user_cols or "lidarr_server_id" not in user_cols:
+            logger.debug("Startup migration: users table schema not ready, skipping.")
+            return
+    except (OperationalError, ProgrammingError) as exc:
+        logger.debug("Startup migration: schema not ready (%s), skipping.", exc)
+        return
 
     # Guard: tables may not exist yet if called during flask db upgrade import
     try:
         server_count = LidarrServer.query.count()
-    except OperationalError:
+    except (OperationalError, ProgrammingError):
         logger.debug("Startup migration: tables not ready yet (pre-migration context), skipping.")
         return
 
@@ -96,9 +115,12 @@ def _migrate_json(settings_file: Path, app, logger: logging.Logger) -> None:
     appsettings.set("openai_max_seed_artists", str(data.get("openai_max_seed_artists", "5")))
     appsettings.set("api_key", data.get("api_key", "") or "")
 
-    user_count = User.query.count()
+    user_count = db.session.execute(text("SELECT count(*) FROM users")).scalar() or 0
     if user_count > 0:
-        User.query.update({"wizard_completed": True, "lidarr_server_id": server.id})
+        db.session.execute(
+            text("UPDATE users SET wizard_completed = 1, lidarr_server_id = :sid"),
+            {"sid": server.id},
+        )
         logger.info("Startup migration: assigned %d existing users to server '%s'", user_count, server.name)
 
     db.session.commit()
